@@ -19,11 +19,14 @@ import androidx.core.text.buildSpannedString
 import androidx.core.text.inSpans
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.LinearLayoutManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import nl.tudelft.ipv8.Community
+import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.common.ui.BaseFragment
 import nl.tudelft.trustchain.common.util.viewBinding
@@ -80,8 +83,16 @@ class DebugFragment : BaseFragment(R.layout.fragment_debug) {
         }
     }
 
+    private var updateJob: Job? = null
+    override fun onDestroyView() {
+        updateJob?.cancel()
+        super.onDestroyView()
+    }
+
     @SuppressLint("SetTextI18n")
     private fun updateView() {
+        if (view == null) return
+
         val ipv8 = getIpv8()
         val demo = getDemoCommunity()
         binding.txtBootstrap.text = Community.DEFAULT_ADDRESSES.joinToString("\n")
@@ -168,6 +179,48 @@ class DebugFragment : BaseFragment(R.layout.fragment_debug) {
         } catch (e: PackageManager.NameNotFoundException) {
             e.printStackTrace()
         }
+
+        binding.peerList.layoutManager = LinearLayoutManager(requireContext())
+
+        val peerItems = ipv8.network.verifiedPeers.map { peer ->
+            PeerItem(
+                ip = peer.address.toString(),
+                lastResponseTime = formatLastResponse(peer.lastResponse),
+                isTimeOut = checkTimeOut(peer),
+                publicKey = peer.publicKey.toString(),
+//                timeouts = calculateTimeouts(peer),
+//                hasAlerts = checkAlerts(peer)
+            )
+        }
+//        val mockData = listOf(
+//            PeerItem(
+//                ip = "217.105.56.174:63022",
+//                lastResponseTime = "1s ago",
+//                publicKey = "a6f32cbed1c1b4d67223b1d",
+//                isTimeOut = false,
+//            ),
+//        )
+        binding.peerList.adapter = PeerAdapter(peerItems)
+    }
+
+    private fun formatLastResponse(lastResponse: Date?): String {
+        return if (lastResponse != null) {
+            val diffSeconds = (System.currentTimeMillis() - lastResponse.time) / 1000
+            when {
+                diffSeconds < 60 -> "${diffSeconds}s ago"
+                diffSeconds < 3600 -> "${diffSeconds / 60}m ago"
+                else -> "${diffSeconds / 3600}h ago"
+            }
+        } else {
+            "Never"
+        }
+    }
+
+    private fun checkTimeOut(peer: Peer): Boolean {
+        val timeoutThreshold = 5 * 60 * 1000L // 5 minute
+        return if (peer.lastResponse?.let {
+                System.currentTimeMillis() - it.time > timeoutThreshold
+            } == true) true else false
     }
 
     private fun updateBootstrapList() {
