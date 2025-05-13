@@ -11,7 +11,9 @@ data class SWSignatureAskBlockTD(
     var SW_TRANSACTION_SERIALIZED: String,
     var SW_PREVIOUS_BLOCK_HASH: String,
     var SW_SIGNATURES_REQUIRED: Int,
-    var SW_RECEIVER_PK: String
+    var SW_RECEIVER_PK: String,
+    var SW_SENDER_PK: String,
+    var SW_CRYPTO_SIGNATURE: String,
 )
 
 open class SWSignatureAskTransactionData(data: JsonObject) : SWBlockTransactionData(
@@ -28,7 +30,9 @@ open class SWSignatureAskTransactionData(data: JsonObject) : SWBlockTransactionD
         previousBlockHash: String,
         requiredSignatures: Int,
         receiverPk: String,
-        uniqueProposalId: String
+        uniqueProposalId: String,
+        senderPk: String,
+        cryptoSignature: String = "",
     ) : this(
         SWUtil.objectToJsonObject(
             SWSignatureAskBlockTD(
@@ -37,7 +41,9 @@ open class SWSignatureAskTransactionData(data: JsonObject) : SWBlockTransactionD
                 transactionSerialized,
                 previousBlockHash,
                 requiredSignatures,
-                receiverPk
+                receiverPk,
+                senderPk,
+                cryptoSignature
             )
         )
     )

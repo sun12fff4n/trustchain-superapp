@@ -18,7 +18,13 @@ import nl.tudelft.trustchain.currencyii.util.taproot.CTransaction
 import nl.tudelft.trustchain.currencyii.util.taproot.MuSig
 import org.bitcoinj.core.Coin
 import org.bitcoinj.core.ECKey
+import org.bitcoinj.core.Sha256Hash
+import org.bouncycastle.jce.ECNamedCurveTable
 import java.math.BigInteger
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.spec.ECParameterSpec
+import java.security.spec.PKCS8EncodedKeySpec
 
 class DAOJoinHelper {
     private fun getTrustChainCommunity(): TrustChainCommunity {
@@ -52,6 +58,17 @@ class DAOJoinHelper {
 
         val proposalIDSignature = SWUtil.randomUUID()
 
+        // generate signature data
+        Log.i("Coin", "Preparing to generate signature for join proposal")
+        val dataToSign = "${blockData.SW_UNIQUE_ID}:${serializedTransaction}:${mostRecentBlockHash}:${proposalIDSignature}"
+        Log.i("Coin", "Data to sign: $dataToSign")
+
+        val ecKey = WalletManagerAndroid.getInstance().protocolECKey()
+        Log.i("Coin", "Using ECKey with public key: ${ecKey.publicKeyAsHex}")
+
+        val ecSignature = ecKey.sign(Sha256Hash.of(dataToSign.toByteArray(Charsets.UTF_8))).encodeToDER().toHex()
+        Log.i("Coin", "Generated EC signature: $ecSignature")
+
         var askSignatureBlockData =
             SWSignatureAskTransactionData(
                 blockData.SW_UNIQUE_ID,
@@ -59,8 +76,11 @@ class DAOJoinHelper {
                 mostRecentBlockHash,
                 requiredSignatures,
                 "",
-                proposalIDSignature
+                proposalIDSignature,
+                ecKey.publicKeyAsHex,
+                ecSignature
             )
+        Log.i("Coin", "Created SWSignatureAskTransactionData: $askSignatureBlockData")
 
         for (swParticipantPk in blockData.SW_TRUSTCHAIN_PKS) {
             Log.i(
@@ -75,7 +95,9 @@ class DAOJoinHelper {
                     mostRecentBlockHash,
                     requiredSignatures,
                     swParticipantPk,
-                    proposalIDSignature
+                    proposalIDSignature,
+                    ecKey.publicKeyAsHex,
+                    ecSignature
                 )
 
             trustchain.createProposalBlock(
@@ -226,6 +248,30 @@ class DAOJoinHelper {
                 return
             }
             Log.i("Coin", "Signing join block transaction: $blockData")
+
+            // verify the signature
+            val dataToVerify =
+                "${blockData.SW_UNIQUE_ID}:${blockData.SW_TRANSACTION_SERIALIZED}:${blockData.SW_PREVIOUS_BLOCK_HASH}:${blockData.SW_UNIQUE_PROPOSAL_ID}"
+            Log.i("Coin", "Data to verify: $dataToVerify")
+            val signatureToVerify = ECKey.ECDSASignature.decodeFromDER(
+                blockData.SW_CRYPTO_SIGNATURE.hexToBytes()
+            )
+
+            Log.i("Coin", "Signature to be verified is ${signatureToVerify}")
+
+            Log.i("Coin", "Sender Public key is ${blockData.SW_SENDER_PK}")
+
+            val isValid = ECKey.verify(
+                Sha256Hash.of(dataToVerify.toByteArray(Charsets.UTF_8)).bytes,
+                signatureToVerify,
+                blockData.SW_SENDER_PK.hexToBytes()
+            )
+
+            if (!isValid) {
+                Log.e("Coin", "Failed to verify crypto signature")
+                return;
+            }
+            Log.i("Coin", "Pass crypto signature verification")
 
             val walletManager = WalletManagerAndroid.getInstance()
 
