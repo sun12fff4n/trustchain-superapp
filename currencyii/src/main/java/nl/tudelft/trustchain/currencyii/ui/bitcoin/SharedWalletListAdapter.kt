@@ -68,6 +68,7 @@ class SharedWalletListAdapter(
         if (this.disableOnUserJoined!! && isUserInWallet) {
             clickToJoin.isEnabled = false
             clickToJoin.setTextColor(Color.GRAY)
+            clickToJoin.setOnClickListener(null)
         }
 
         return view
