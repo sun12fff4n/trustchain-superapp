@@ -9,14 +9,30 @@ import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
+import nl.tudelft.ipv8.Peer
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
 import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
 
+interface FrostSendDelegate {
+    fun frostSend(peer: Peer, data: ByteArray): Unit
+}
+
 @Suppress("UNCHECKED_CAST")
-class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community() {
+class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community(), FrostSendDelegate {
     override val serviceId = serviceId
+
+
+    // send function for frost
+    override fun frostSend(peer: Peer, data: ByteArray): Unit {
+        return send(peer, data)
+    }
+
+    // receive callback for frost
+    init {
+//        messageHandlers[FrostMessage.ID] = ::onFrostMessage
+    }
 
     private fun getTrustChainCommunity(): TrustChainCommunity {
         return IPv8Android.getInstance().getOverlay()
