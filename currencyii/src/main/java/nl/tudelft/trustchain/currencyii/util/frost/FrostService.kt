@@ -5,6 +5,7 @@ import java.util.*
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.trustchain.currencyii.CoinCommunity
+import java.math.BigInteger
 
 class FrostService(
     private val initParticipants: List<Peer>,
@@ -12,6 +13,7 @@ class FrostService(
     private val send: (Peer, ByteArray) -> Unit
 ) {
     private var keyGenJob: Job? = null
+    private var participantId: String = UUID.randomUUID().toString()
     private var participants: List<Peer> = initParticipants
     private var threshold: Int = initThreshold
     private val sessionId = UUID.randomUUID().toString()
@@ -41,9 +43,9 @@ class FrostService(
         startKeyGen(onResult)
     }
 
-    private fun doKeyGen(): KeyGenResult {
+    private suspend fun doKeyGen(): KeyGenResult {
         // Instantiate a FrostKeyGenEngine
-        engine = FrostKeyGenEngine(threshold, participants, sessionId, send)
+        engine = FrostKeyGenEngine(threshold, participantId, participants, sessionId, send)
         
         // Register the engine with CoinCommunity
         getCoinCommunity().registerFrostKeyGenEngine(sessionId, engine!!)
@@ -63,9 +65,9 @@ class FrostService(
 
 data class KeyGenResult(
     val success: Boolean = false,
-    val signingShare: Long? = null,
-    val verificationShare: Long? = null,
-    val groupPublicKey: Long? = null,
+    val signingShare: BigInteger? = null,
+    val verificationShare: BigInteger? = null,
+    val groupPublicKey: BigInteger? = null,
     val participants: List<String> = emptyList(),
     val threshold: Int = 0,
     val errorMessage: String? = null

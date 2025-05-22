@@ -14,6 +14,7 @@ import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.messaging.Packet
+import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
@@ -24,6 +25,7 @@ import nl.tudelft.trustchain.currencyii.util.frost.FrostMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
 import nl.tudelft.trustchain.currencyii.util.frost.FrostVerificationShareMessage
 import java.util.concurrent.ConcurrentHashMap
+import java.util.Base64
 
 interface FrostSendDelegate {
     fun frostSend(peer: Peer, data: ByteArray): Unit
@@ -47,10 +49,19 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     }
 
     private fun onFrostMessage(packet: Packet) {
-        val (peer, payload) = packet.getAuthPayload(FrostMessage)
+        val (peer, payload) = packet.getAuthPayload(object : Deserializable<FrostMessage> {
+            override fun deserialize(buffer: ByteArray, offset: Int): Pair<FrostMessage, Int> {
+                // Just ignore offset for now since our deserializer doesn’t use it
+                val (message, _) = FrostMessage.deserialize(buffer.copyOfRange(offset, buffer.size))
+                return Pair(message, buffer.size - offset)
+            }
+        })
         val frostMessage = payload as FrostMessage
         val sessionId = frostMessage.sessionId
-        val peerPublicKeyHex = peer.publicKey.keyToBin().toHex()
+        val peerId: (Peer) -> String = { p ->
+            Base64.getEncoder().encodeToString(p.publicKey.keyToBin())
+        }
+        val peerPublicKeyHex = peerId(peer)
 
         // Find the corresponding key generation engine
         val engine = activeKeyGenEngines[sessionId]

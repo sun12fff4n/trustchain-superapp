@@ -4,6 +4,7 @@ import nl.tudelft.ipv8.messaging.Serializable
 import nl.tudelft.ipv8.messaging.serializeVarLen
 import java.io.ByteArrayOutputStream
 import java.util.*
+import java.math.BigInteger
 
 /**
  * Message types for FROST protocol communication
@@ -67,9 +68,9 @@ class FrostMessage(
  * Message for Round 1: Contains commitment and proof
  */
 class FrostCommitmentMessage(
-    sessionId: String,
-    val commitment: List<Long>,
-    val proof: Pair<Long, Long>
+    val sessionId: String,
+    val commitment: List<BigInteger>,
+    val proof: Pair<BigInteger, BigInteger>
 ) : Serializable {
     
     companion object {
@@ -78,24 +79,25 @@ class FrostCommitmentMessage(
             val commitmentSize = buffer[0].toInt()
             
             // Read the commitment values
-            val commitment = ArrayList<Long>()
+            val commitment = ArrayList<BigInteger>()
             var offset = 1
             for (i in 0 until commitmentSize) {
-                val longBytes = ByteArray(8)
-                System.arraycopy(buffer, offset, longBytes, 0, 8)
-                commitment.add(longBytes.toLong())
-                offset += 8
+                val len = buffer[offset].toInt()
+                offset += 1
+                val bytes = buffer.copyOfRange(offset, offset + len)
+                commitment.add(BigInteger(bytes))
+                offset += len
             }
             
             // Read the proof (R, z)
-            val rBytes = ByteArray(8)
-            System.arraycopy(buffer, offset, rBytes, 0, 8)
-            val r = rBytes.toLong()
-            offset += 8
-            
-            val zBytes = ByteArray(8)
-            System.arraycopy(buffer, offset, zBytes, 0, 8)
-            val z = zBytes.toLong()
+            val rLen = buffer[offset].toInt()
+            offset += 1
+            val r = BigInteger(buffer.copyOfRange(offset, offset + rLen))
+            offset += rLen
+
+            val zLen = buffer[offset].toInt()
+            offset += 1
+            val z = BigInteger(buffer.copyOfRange(offset, offset + zLen))
             
             return FrostCommitmentMessage(sessionId, commitment, Pair(r, z))
         }
@@ -109,12 +111,19 @@ class FrostCommitmentMessage(
         
         // Write the commitment values
         for (value in commitment) {
-            outputBuffer.write(value.toByteArray())
+            val bytes = value.toByteArray()
+            outputBuffer.write(bytes.size)         // Write length prefix (1 byte)
+            outputBuffer.write(bytes)              // Then actual bytes
         }
         
         // Write the proof (R, z)
-        outputBuffer.write(proof.first.toByteArray())
-        outputBuffer.write(proof.second.toByteArray())
+        val rBytes = proof.first.toByteArray()
+        outputBuffer.write(rBytes.size)
+        outputBuffer.write(rBytes)
+
+        val zBytes = proof.second.toByteArray()
+        outputBuffer.write(zBytes.size)
+        outputBuffer.write(zBytes)
         
         return outputBuffer.toByteArray()
     }
@@ -128,8 +137,8 @@ class FrostCommitmentMessage(
  * Message for Round 2: Contains verification share
  */
 class FrostVerificationShareMessage(
-    sessionId: String,
-    val verificationShare: Long
+    val sessionId: String,
+    val verificationShare: BigInteger
 ) : Serializable {
     
     companion object {
@@ -137,7 +146,7 @@ class FrostVerificationShareMessage(
             // Read the verification share
             val verificationShareBytes = ByteArray(8)
             System.arraycopy(buffer, 0, verificationShareBytes, 0, 8)
-            val verificationShare = verificationShareBytes.toLong()
+            val verificationShare = BigInteger.valueOf(verificationShareBytes.toLong())
             
             return FrostVerificationShareMessage(sessionId, verificationShare)
         }
