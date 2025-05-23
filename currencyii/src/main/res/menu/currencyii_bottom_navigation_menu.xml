@@ -21,4 +21,9 @@
         android:icon="@drawable/ic_account_balance_wallet_black_24dp"
         android:title="@string/my_wallet" />
 
+    <item
+        android:id="@+id/raftTestFragment"
+        android:icon="@drawable/ic_group_work_black_24dp"
+        android:title="RaftTest" />
+
 </menu>

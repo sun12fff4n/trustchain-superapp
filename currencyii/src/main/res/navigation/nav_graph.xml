@@ -212,4 +212,8 @@
         android:name="nl.tudelft.trustchain.currencyii.ui.bitcoin.MyProposalsFragment"
         android:label="@string/proposals"
         tools:layout="@layout/fragment_my_proposals" />
+    <activity
+        android:id="@+id/raftTestFragment"
+        android:name="nl.tudelft.trustchain.currencyii.ui.raft.RaftTestActivity"
+        android:label="RaftTest" />
 </navigation>

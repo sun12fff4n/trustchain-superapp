@@ -3,6 +3,10 @@ package nl.tudelft.trustchain.currencyii
 import android.util.Log
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
+import android.content.Intent
+import android.os.Bundle
+import android.view.MenuItem
+import nl.tudelft.trustchain.currencyii.ui.raft.RaftTestActivity
 import nl.tudelft.trustchain.common.BaseActivity
 
 class CurrencyIIMainActivity : BaseActivity() {
@@ -24,6 +28,27 @@ class CurrencyIIMainActivity : BaseActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+//    override fun onCreate(savedInstanceState: Bundle?) {
+//        super.onCreate(savedInstanceState)
+//
+//        // 在已有代码的基础上添加
+//        findNavController(R.id.navHostFragment).addOnDestinationChangedListener { _, destination, _ ->
+//            if (destination.id == R.id.raftTestActivity) {
+//                startActivity(Intent(this, RaftTestActivity::class.java))
+//            }
+//        }
+//    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            R.id.raftTestFragment -> {
+                startActivity(Intent(this, RaftTestActivity::class.java))
+                return true
+            }
+        }
+        return super.onOptionsItemSelected(item)
     }
 
     fun addTopLevelDestinationId(id: Int) {

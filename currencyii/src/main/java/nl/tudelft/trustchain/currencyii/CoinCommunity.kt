@@ -2,6 +2,7 @@ package nl.tudelft.trustchain.currencyii
 
 import android.app.Activity
 import android.content.Context
+import android.util.Log
 import nl.tudelft.ipv8.Community
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
@@ -10,28 +11,51 @@ import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.ipv8.Peer
+import nl.tudelft.ipv8.messaging.Packet
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
 import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
+//import nl.tudelft.trustchain.currencyii.util.frost.FrostSignatureMessage
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
+import java.nio.ByteBuffer
 
 interface FrostSendDelegate {
     fun frostSend(peer: Peer, data: ByteArray): Unit
 }
 
+interface RaftSendDelegate {
+    fun raftSend(peer: Peer, data: ByteArray): Unit
+    val myPeer: Peer
+}
+
 @Suppress("UNCHECKED_CAST")
-class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community(), FrostSendDelegate {
+class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community(), FrostSendDelegate, RaftSendDelegate {
     override val serviceId = serviceId
 
+    override lateinit var myPeer: Peer
 
     // send function for frost
     override fun frostSend(peer: Peer, data: ByteArray): Unit {
         return send(peer, data)
     }
 
+    // send function for raft
+    override fun raftSend(peer: Peer, data: ByteArray): Unit {
+        return send(peer, data)
+    }
+
     // receive callback for frost
     init {
 //        messageHandlers[FrostMessage.ID] = ::onFrostMessage
+        messageHandlers[RaftElectionMessage.REQUEST_VOTE_ID] = ::onRequestVote
+        messageHandlers[RaftElectionMessage.VOTE_RESPONSE_ID] = ::onVoteResponse
+        messageHandlers[RaftElectionMessage.HEARTBEAT_ID] = ::onHeartbeat
+
+//        messageHandlers[FrostSignatureMessage.REQUEST_SIGNATURE_ID] = { packet -> onFrostSignatureRequest(packet.peer, packet.data) }
+//        messageHandlers[FrostSignatureMessage.SIGNATURE_RESULT_ID] = { packet -> onFrostSignatureResult(packet.peer, packet.data) }
+//        messageHandlers[FrostSignatureMessage.SIGNATURE_ERROR_ID] = { packet -> onFrostSignatureError(packet.peer, packet.data) }
     }
 
     private fun getTrustChainCommunity(): TrustChainCommunity {
@@ -42,6 +66,98 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     private val daoCreateHelper = DAOCreateHelper()
     private val daoJoinHelper = DAOJoinHelper()
     private val daoTransferFundsHelper = DAOTransferFundsHelper()
+
+    /**
+     *
+     * Raft Election
+     *
+     */
+    // Lazy Allocation
+    private var frostCoordinatorCallback: ((isLeader: Boolean, newLeader: Peer?) -> Unit)? = null
+
+    private var _raftElectionModule: RaftElectionModule? = null
+
+    val raftElectionModule: RaftElectionModule
+        get() {
+            if (_raftElectionModule == null) {
+                initializeRaftElection()
+            }
+            return _raftElectionModule!!
+        }
+
+    fun isRaftInitialized(): Boolean = _raftElectionModule != null
+
+    fun initializeRaftElection() {
+        if (_raftElectionModule == null) {
+            _raftElectionModule = RaftElectionModule(this)
+
+            // Set up leader change callback
+            _raftElectionModule?.onLeaderChanged { newLeader ->
+                Log.d(TAG, "Leader changed to: ${newLeader?.mid ?: "None"}")
+                frostCoordinatorCallback?.invoke(isRaftInitialized() &&
+                    _raftElectionModule?.isLeader() == true, newLeader)
+            }
+
+            _raftElectionModule?.start()
+        }
+    }
+
+    fun onFrostCoordinatorChanged(callback: (isLeader: Boolean, newLeader: Peer?) -> Unit) {
+        frostCoordinatorCallback = callback
+    }
+
+    fun addRaftPeer(peer: Peer) {
+        if (isRaftInitialized()) {
+            raftElectionModule.addPeer(peer)
+        }
+    }
+
+    fun removeRaftPeer(peer: Peer) {
+        if (isRaftInitialized()) {
+            raftElectionModule.removePeer(peer)
+        }
+    }
+
+    fun isFrostCoordinator(): Boolean {
+        return isRaftInitialized() && raftElectionModule.isLeader()
+    }
+
+    fun getFrostCoordinator(): Peer? {
+        return if (isRaftInitialized()) {
+            raftElectionModule.getCurrentLeader()
+        } else null
+    }
+
+    // handle RequestVote
+    private fun onRequestVote(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
+
+        // Handle request vote and check if the vote is granted
+        val voteGranted = raftElectionModule.handleRequestVote(peer, message.term, message.candidateId)
+
+        // Send vote response
+        val response = RaftElectionMessage.VoteResponse(
+            raftElectionModule.getCurrentTerm(),
+            voteGranted
+        )
+        send(peer, response.serialize())
+    }
+
+    // Handle VoteResponse
+    private fun onVoteResponse(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.VoteResponse)
+
+        // Handle vote response
+        raftElectionModule.handleVoteResponse(peer, message.term, message.voteGranted)
+    }
+
+    // Handle Heartbeat
+    private fun onHeartbeat(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.Heartbeat)
+
+        // Handle heartbeat message
+        raftElectionModule.handleHeartbeat(peer, message.term, message.leaderId)
+    }
 
     /**
      * Create a bitcoin genesis wallet and broadcast the result on trust chain.
@@ -428,5 +544,13 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         // Block type for responding with a negative vote to a signature request with a signature
         const val SIGNATURE_AGREEMENT_NEGATIVE_BLOCK = "v1DAO_SIGNATURE_AGREEMENT_NEGATIVE"
+
+        // FROST signature message types
+        const val FROST_REQUEST_SIGNATURE = "v1FROST_REQUEST_SIGNATURE"
+        const val FROST_SIGNATURE_RESULT = "v1FROST_SIGNATURE_RESULT"
+        const val FROST_SIGNATURE_ERROR = "v1FROST_SIGNATURE_ERROR"
+
+        private const val TAG = "CoinCommunity"
+
     }
 }
