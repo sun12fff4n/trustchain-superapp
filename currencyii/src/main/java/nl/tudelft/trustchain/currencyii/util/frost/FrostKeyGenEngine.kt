@@ -15,9 +15,9 @@ import java.math.BigInteger
 import java.security.MessageDigest
 
 class FrostKeyGenEngine(
-    private val threshold: Int, 
+    private val threshold: Int,
     private val participantId: String,
-    private val participants: List<Peer>, 
+    private val participants: List<Peer>,
     private val sessionId: String,
     private val send: (Peer, ByteArray) -> Unit
 ) {
@@ -31,32 +31,23 @@ class FrostKeyGenEngine(
     private var signingShare: BigInteger? = null // This participant's signing share s_i
     private var verificationShare: BigInteger? = null // This participant's public verification share Y_i
     private var groupPublicKey: BigInteger? = null // Group public key Y (can be computed by all)
-    
+
     // Received commitments and verification shares from other participants
     private val commitments = ConcurrentHashMap<String, List<BigInteger>>()
     private val proofs = ConcurrentHashMap<String, Pair<BigInteger, BigInteger>>()
     private val verificationShares = ConcurrentHashMap<String, BigInteger>()
-    
+
     // Locks for synchronization
     private val commitmentsMutex = Mutex()
     private val verificationSharesMutex = Mutex()
-    
+
     // Peer ID mapping
     private val peerIdMapping = HashMap<String, Peer>()
-    
+
     // Secure random for better security
     private val secureRandom = SecureRandom()
+    private val RESPONSE_TIMEOUT = FrostConstants.DEFAULT_TIMEOUT
 
-    companion object FrostConstants {
-        // A large prime (in a production environment, use a cryptographically secure prime)
-        val p: BigInteger = BigInteger("170141183460469231731687303715884105727") // prime
-        // A generator of the group (in a production environment, use a proper generator)
-        val g: BigInteger = BigInteger.valueOf(3)
-        // Modulus
-        val n: BigInteger = p.subtract(BigInteger.ONE) // n = p - 1
-        // Timeout for waiting for responses (in ms)
-        const val RESPONSE_TIMEOUT = 30000L // 30 seconds
-    }
 
     init {
         // Initialize peer ID mapping
@@ -69,7 +60,7 @@ class FrostKeyGenEngine(
     suspend fun generate(): KeyGenResult {
         try {
             round1()
-        
+
             println("Waiting for commitments...")
             if (!waitForCommitments()) {
                 return KeyGenResult(
@@ -96,7 +87,7 @@ class FrostKeyGenEngine(
                     errorMessage = "Timeout waiting for verification shares from all participants"
                 )
             }
-            
+
             println("Verification shares received. Calculating group public key...")
             computeGroupPublicKey()
 
@@ -139,10 +130,10 @@ class FrostKeyGenEngine(
         // Round 1.4: Broadcast commitment and proof to all participants
         val commitmentMessage = FrostCommitmentMessage(sessionId, commitment!!, proof!!)
         val message = commitmentMessage.toFrostMessage()
-        
+
         val self = peerIdMapping[participantId]
         send(self!!, message.serialize())
-        
+
         // Also store our own commitment
         commitments[participantId] = commitment!!
         proofs[participantId] = proof!!
@@ -152,26 +143,26 @@ class FrostKeyGenEngine(
     private fun round2() {
         // Initialize shares map
         shares = mutableMapOf()
-        
+
         // Round 2.1: Compute signing share (s_i) and verification share (Y_i)
         // The signing share is just a[0], the constant term of our polynomial
         signingShare = a[0]
-        
+
         // The verification share is g^s_i mod q
         verificationShare = FrostConstants.g.modPow(signingShare!!, FrostConstants.p)
         println("peerId: ${participantId} --- verificationShare: ${verificationShare}")
-        
+
         // Round 2.2: Broadcast verification share to all participants
         val verificationShareMessage = FrostVerificationShareMessage(sessionId, verificationShare!!)
         val message = verificationShareMessage.toFrostMessage()
-        
+
         val self = peerIdMapping[participantId]
         send(self!!, message.serialize())
 
         // Also store our own verification share
         verificationShares[participantId] = verificationShare!!
     }
-    
+
     private fun computeGroupPublicKey() {
         var product = BigInteger("1")
         for ((_, commit) in commitments) {
@@ -180,7 +171,7 @@ class FrostKeyGenEngine(
         println("peerId: ${participantId} calculated the following group public key: $product")
         groupPublicKey = product
     }
-    
+
     // Wait for all commitments to be received
     private suspend fun waitForCommitments(): Boolean {
         val startTime = System.currentTimeMillis()
@@ -194,7 +185,7 @@ class FrostKeyGenEngine(
         }
         return false
     }
-    
+
     // Wait for all verification shares to be received
     private suspend fun waitForVerificationShares(): Boolean {
         val startTime = System.currentTimeMillis()
@@ -208,7 +199,7 @@ class FrostKeyGenEngine(
         }
         return false
     }
-    
+
     // Verify all commitments and proofs
     private fun verifyAllCommitments(): Boolean {
         for ((peerId, commitment) in commitments) {
@@ -219,20 +210,20 @@ class FrostKeyGenEngine(
         }
         return true
     }
-    
+
     // Verify a single commitment and proof
     private fun verifyCommitment(commitment: List<BigInteger>, proof: Pair<BigInteger, BigInteger>): Boolean {
         val g_ai0 = commitment[0] // g^a_0 mod q
         val r = proof.first
         val z = proof.second
-        
+
         val c = hashToBigInt("FROST-KeyGen", g_ai0, r, FrostConstants.n)
         val lhs = FrostConstants.g.modPow(z, FrostConstants.p)
         val rhs = r.multiply(g_ai0.modPow(c, FrostConstants.p)).mod(FrostConstants.p)
 
         return lhs == rhs
     }
-    
+
     // Process a received commitment message
     suspend fun processCommitmentMessage(peerId: String, commitment: List<BigInteger>, proof: Pair<BigInteger, BigInteger>) {
         commitmentsMutex.withLock {
@@ -240,7 +231,7 @@ class FrostKeyGenEngine(
             proofs[peerId] = proof
         }
     }
-    
+
     // Process a received verification share message
     suspend fun processVerificationShareMessage(peerId: String, verificationShare: BigInteger) {
         verificationSharesMutex.withLock {
