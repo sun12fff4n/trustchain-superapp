@@ -3,6 +3,9 @@ package nl.tudelft.trustchain.currencyii
 import android.app.Activity
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import nl.tudelft.ipv8.Community
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
@@ -12,6 +15,7 @@ import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.messaging.Packet
+import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
@@ -20,6 +24,13 @@ import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
 import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
 import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
 import java.nio.ByteBuffer
+import nl.tudelft.trustchain.currencyii.util.frost.FrostCommitmentMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostKeyGenEngine
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
+import nl.tudelft.trustchain.currencyii.util.frost.FrostVerificationShareMessage
+import java.util.concurrent.ConcurrentHashMap
+import java.util.Base64
 
 interface FrostSendDelegate {
     fun frostSend(peer: Peer, data: ByteArray): Unit
@@ -35,6 +46,8 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     override val serviceId = serviceId
 
     override lateinit var myPeer: Peer
+    // Map to store active FROST key generation engines by session ID
+    private val activeKeyGenEngines = ConcurrentHashMap<String, FrostKeyGenEngine>()
 
     // send function for frost
     override fun frostSend(peer: Peer, data: ByteArray): Unit {
@@ -56,6 +69,51 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 //        messageHandlers[FrostSignatureMessage.REQUEST_SIGNATURE_ID] = { packet -> onFrostSignatureRequest(packet.peer, packet.data) }
 //        messageHandlers[FrostSignatureMessage.SIGNATURE_RESULT_ID] = { packet -> onFrostSignatureResult(packet.peer, packet.data) }
 //        messageHandlers[FrostSignatureMessage.SIGNATURE_ERROR_ID] = { packet -> onFrostSignatureError(packet.peer, packet.data) }
+        messageHandlers[FrostMessage.ID] = ::onFrostMessage
+    }
+
+    private fun onFrostMessage(packet: Packet) {
+        val (peer, payload) = packet.getAuthPayload(object : Deserializable<FrostMessage> {
+            override fun deserialize(buffer: ByteArray, offset: Int): Pair<FrostMessage, Int> {
+                // Just ignore offset for now since our deserializer doesn’t use it
+                val (message, _) = FrostMessage.deserialize(buffer.copyOfRange(offset, buffer.size))
+                return Pair(message, buffer.size - offset)
+            }
+        })
+        val frostMessage = payload as FrostMessage
+        val sessionId = frostMessage.sessionId
+        val peerId: (Peer) -> String = { p ->
+            Base64.getEncoder().encodeToString(p.publicKey.keyToBin())
+        }
+        val peerPublicKeyHex = peerId(peer)
+
+        // Find the corresponding key generation engine
+        val engine = activeKeyGenEngines[sessionId]
+        
+        if (engine != null) {
+            CoroutineScope(Dispatchers.Default).launch {
+                when (frostMessage.messageType) {
+                    FrostMessageType.COMMITMENT -> {
+                        val commitmentMessage = FrostCommitmentMessage.deserialize(sessionId, frostMessage.data)
+                        engine.processCommitmentMessage(peerPublicKeyHex, commitmentMessage.commitment, commitmentMessage.proof)
+                    }
+                    FrostMessageType.VERIFICATION_SHARE -> {
+                        val verificationShareMessage = FrostVerificationShareMessage.deserialize(sessionId, frostMessage.data)
+                        engine.processVerificationShareMessage(peerPublicKeyHex, verificationShareMessage.verificationShare)
+                    }
+                }
+            }
+        }
+    }
+
+    // Register a new FROST key generation engine
+    fun registerFrostKeyGenEngine(sessionId: String, engine: FrostKeyGenEngine) {
+        activeKeyGenEngines[sessionId] = engine
+    }
+
+    // Unregister a FROST key generation engine
+    fun unregisterFrostKeyGenEngine(sessionId: String) {
+        activeKeyGenEngines.remove(sessionId)
     }
 
     private fun getTrustChainCommunity(): TrustChainCommunity {
