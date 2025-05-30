@@ -17,6 +17,7 @@ import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.currencyii.CoinCommunity
 import nl.tudelft.trustchain.currencyii.R
 import nl.tudelft.trustchain.currencyii.databinding.FragmentMyProposalsBinding
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWSignatureAskTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWTransferFundsAskTransactionData
@@ -85,6 +86,14 @@ class MyProposalsFragment : BaseFragment(R.layout.fragment_my_proposals) {
                         Log.e("Coin", "join voting failed: ${t.message ?: "no message"}")
                     }
                 }
+                if (block.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK) {
+                    try {
+                        val bundle = bundleOf("type" to block.type, "blockId" to block.blockId)
+                        findNavController().navigate(R.id.votesFragment, bundle)
+                    } catch (t: Throwable) {
+                        Log.e("Coin", "join voting failed: ${t.message ?: "no message"}")
+                    }
+                }
             }
         }
     }
@@ -98,7 +107,11 @@ class MyProposalsFragment : BaseFragment(R.layout.fragment_my_proposals) {
         val walletID =
             if (proposal.type == CoinCommunity.SIGNATURE_ASK_BLOCK) {
                 SWSignatureAskTransactionData(proposal.transaction).getData().SW_UNIQUE_ID
-            } else {
+            }
+            else if (proposal.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK) {
+                FrostSWSignatureAskTransactionData(proposal.transaction).getData().SW_UNIQUE_ID
+            }
+            else {
                 SWTransferFundsAskTransactionData(proposal.transaction).getData().SW_UNIQUE_ID
             }
         return getUserWalletIds().contains(walletID)
@@ -158,7 +171,8 @@ class MyProposalsFragment : BaseFragment(R.layout.fragment_my_proposals) {
                         .filter {
                             (
                                 it.type == CoinCommunity.SIGNATURE_ASK_BLOCK ||
-                                    it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK
+                                    it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK ||
+                                        it.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK
                             ) && !getCoinCommunity().checkEnoughFavorSignatures(it)
                         }
                 Log.i(

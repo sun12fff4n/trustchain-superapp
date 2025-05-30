@@ -206,6 +206,18 @@ class TrustChainApplication : Application() {
                 }
             }
         )
+
+        trustchain.addListener(
+            CoinCommunity.FROST_SIGNATURE_ASK_BLOCK,
+            object : BlockListener {
+                override fun onBlockReceived(block: TrustChainBlock) {
+                    Log.d(
+                        "Coin",
+                        "onFrostBlockReceived: ${block.blockId} ${block.transaction}"
+                    )
+                }
+            }
+        )
     }
 
     private fun createWalletCommunity(): OverlayConfiguration<AttestationCommunity> {

@@ -89,6 +89,46 @@ class DAOJoinHelper {
     }
 
     /**
+     * 2.1.frost Send a proposal on the trust chain to join a shared wallet and to collect Frost signatures.
+     * The proposal is a serialized bitcoin join transaction.
+     * **NOTE** the latest walletBlockData should be given, otherwise the serialized transaction is invalid.
+     * @param mostRecentWalletBlock - the latest (that you know of) shared wallet block.
+     */
+    fun proposeJoinWalletFrost(
+        myPeer: Peer,
+        mostRecentWalletBlock: TrustChainBlock
+    ): FrostSWSignatureAskTransactionData {
+        val mostRecentBlockHash = mostRecentWalletBlock.calculateHash().toHex()
+        val blockData = SWJoinBlockTransactionData(mostRecentWalletBlock.transaction).getData()
+
+        val serializedTransaction =
+            createBitcoinSharedWalletForJoining(blockData)
+
+        val total = blockData.SW_BITCOIN_PKS.size
+        val requiredSignatures =
+            SWUtil.percentageToIntThreshold(total, blockData.SW_VOTING_THRESHOLD)
+
+        val proposalIDSignature = SWUtil.randomUUID()
+
+        var askSignatureBlockData =
+            FrostSWSignatureAskTransactionData(
+                blockData.SW_UNIQUE_ID,
+                serializedTransaction,
+                mostRecentBlockHash,
+                requiredSignatures,
+                proposalIDSignature
+            )
+        trustchain.createProposalBlock(
+            askSignatureBlockData.getJsonString(),
+            myPeer.publicKey.keyToBin(),
+            askSignatureBlockData.blockType
+        )
+        Log.e("Fuck", "I am a pig")
+        return askSignatureBlockData
+    }
+
+
+    /**
      * 2.1.1 This functions handles the process of creating a bitcoin DAO join transaction.
      * Create a bitcoin transaction that creates a new shared wallet. This takes some time to complete.
      *
@@ -165,6 +205,52 @@ class DAOJoinHelper {
 
         oldWalletBlockData.getData().SW_NONCE_PKS = newNonces
 
+        broadcastJoinedSharedWallet(myPeer, oldWalletBlockData, serializedTransaction, context)
+    }
+
+    /**
+     * 2.2.frost Commit the join wallet transaction via frost on the bitcoin blockchain and broadcast the result on trust chain.
+     *
+     * Note:
+     * There should be enough sufficient signatures, based on the multisig wallet data.
+     * @throws - exceptions if something goes wrong with creating or broadcasting bitcoin transaction.
+     * @param myPeer - Peer, the user that wants to join the wallet
+     * @param walletBlockData - TrustChainTransaction, describes the wallet that is joined
+     * @param blockData - FrostSWSignatureAskBlockTD, the block where the other users are voting on
+     * @param response - the positive frost response for your request to join the wallet
+     */
+    fun joinBitcoinWalletFrost(
+        myPeer: Peer,
+        walletBlockData: TrustChainTransaction,
+        blockData: FrostSWSignatureAskBlockTD,
+        response: FrostSWResponseSignatureBlockTD,
+        context: Context
+    ) {
+        val oldWalletBlockData = SWJoinBlockTransactionData(walletBlockData)
+        val newTransactionSerialized = blockData.SW_TRANSACTION_SERIALIZED
+
+        val walletManager = WalletManagerAndroid.getInstance()
+
+        // we do not need schnoor anymore, as we do all the aggregation offline in frost :)
+        val frostSignature = BigInteger(1, response.SW_FROSTSIGNATURE_SERIALIZED.hexToBytes())
+
+        val newTransactionProposal = newTransactionSerialized.hexToBytes()
+        val cTx = CTransaction().deserialize(newTransactionProposal)
+
+        // use frost signature to propose transaction
+        val (status, serializedTransaction) =
+            walletManager.safeSendingJoinWalletTransactionWithFrost(
+                frostSignature,
+                cTx
+            )
+        if (status) {
+            Log.i("Coin", "Successfully submitted taproot transaction to server")
+        } else {
+            Log.e("Coin", "Taproot transaction submission to server failed")
+        }
+
+        // actually, this generates a nonce for the joiner, but is is unnecessary for frost as we generate it locally
+        // but................... I am tired.
         broadcastJoinedSharedWallet(myPeer, oldWalletBlockData, serializedTransaction, context)
     }
 

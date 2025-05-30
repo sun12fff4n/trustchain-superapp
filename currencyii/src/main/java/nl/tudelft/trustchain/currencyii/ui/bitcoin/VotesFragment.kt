@@ -89,6 +89,13 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
             // Check which type the block is and set the corresponding data
             if (type == CoinCommunity.SIGNATURE_ASK_BLOCK) {
                 signatureAskBlockVotes(blockId)
+            } else if (type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK){
+                Log.e("coin", "I saw it!!")
+                updateVotersList(arrayListOf(), arrayListOf(), arrayListOf())
+                updateTabsAdapter(0);
+                updateTabsAdapter(1);
+                updateTabsAdapter(2);
+                frostSignatureAskBlockVotes(blockId)
             } else if (type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK) {
                 transferFundsAskBlockVotes(blockId)
             }
@@ -127,7 +134,8 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
                     .getChainByUser(peer.publicKey.keyToBin())
                     .filter {
                         it.type == CoinCommunity.SIGNATURE_ASK_BLOCK ||
-                            it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK
+                            it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK ||
+                                it.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK
                     }
             allBlocks = allBlocks + crawlResult
         }
@@ -253,6 +261,85 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
                 }
                 delay(1000)
             }
+        }
+    }
+
+    /**
+     * The method for setting the data for frost join requests
+     */
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun frostSignatureAskBlockVotes(blockId: String) {
+        updateVotersList(arrayListOf(), arrayListOf(), arrayListOf())
+        updateTabsAdapter(0);
+        updateTabsAdapter(1);
+        updateTabsAdapter(2);
+
+        val walletManager = WalletManagerAndroid.getInstance()
+        val myPublicBitcoinKey = walletManager.protocolECKey().publicKeyAsHex
+        val myPublicKey = getTrustChainCommunity().myPeer.publicKey.keyToBin()
+        val block = getSelectedBlock(blockId) ?: return
+
+        val rawData = SWSignatureAskTransactionData(block.transaction)
+        val data = rawData.getData()
+
+        val walletId = data.SW_UNIQUE_ID
+
+        // Get information about the shared wallet
+        val sw =
+            getCoinCommunity().discoverSharedWallets()
+                .filter { b -> SWJoinBlockTransactionData(b.transaction).getData().SW_UNIQUE_ID == walletId }[0]
+        val swData = SWJoinBlockTransactionData(sw.transaction).getData()
+
+        // Get the id of the person that wants to join
+        val requestToJoinId = sw.publicKey.toHex()
+
+        // Set the voters so that they are visible in the different kind of tabs
+//        setVoters(swData.SW_BITCOIN_PKS, data)
+
+        // TODO: Check if I have already voted, for demo, we really dont need to implement this i think.
+        // but of course, it would be nice if somebody can implement it
+
+        title.text = data.SW_UNIQUE_PROPOSAL_ID
+        subTitle.text = getString(R.string.vote_join_request_message, requestToJoinId, walletId)
+
+        // Vote functionality
+        voteFab.setOnClickListener { v ->
+            val builder = AlertDialog.Builder(v.context)
+            builder.setTitle(R.string.vote_join_request_title)
+            builder.setMessage(
+                getString(
+                    R.string.vote_join_request_message,
+                    requestToJoinId,
+                    walletId
+                )
+            )
+            builder.setPositiveButton("YES") { _, _ ->
+                // Update the voter's list, because I voted yes
+                // Update the GUI
+
+                Toast.makeText(
+                    v.context,
+                    getString(R.string.vote_join_request_upvoted, requestToJoinId, walletId),
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                // Send yes vote
+                getCoinCommunity().joinAskBlockReceived(block, myPublicKey, true, requireContext())
+                Log.i("Coin", "Voted yes on frost joining of: ${block.transaction}")
+            }
+
+            builder.setNeutralButton("NO") { _, _ ->
+                Toast.makeText(
+                    v.context,
+                    getString(R.string.vote_join_request_downvoted, requestToJoinId, walletId),
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                // Send no vote
+                getCoinCommunity().joinAskBlockReceived(block, myPublicKey, false, requireContext())
+                Log.i("Coin", "Voted no on frost joining of: ${block.transaction}")
+            }
+            builder.show()
         }
     }
 

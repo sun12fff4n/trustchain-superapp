@@ -54,7 +54,8 @@ class SWJoinBlockTransactionData(data: JsonObject) : SWBlockTransactionData(
         trustChainPks: ArrayList<String>,
         bitcoinPks: ArrayList<String>,
         noncePks: ArrayList<String>,
-        uniqueId: String = SWUtil.randomUUID()
+//        uniqueId: String = SWUtil.randomUUID()
+        uniqueId: String = java.util.UUID.randomUUID().toString()
     ) : this(
         SWUtil.objectToJsonObject(
             SWJoinBlockTD(

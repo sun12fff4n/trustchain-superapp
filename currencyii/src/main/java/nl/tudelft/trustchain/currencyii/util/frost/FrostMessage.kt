@@ -1,22 +1,80 @@
 package nl.tudelft.trustchain.currencyii.util.frost
 
+import android.util.Log
+import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.ipv8.messaging.Serializable
+import nl.tudelft.ipv8.messaging.deserializeVarLen
+import nl.tudelft.ipv8.messaging.serializeInt
 import nl.tudelft.ipv8.messaging.serializeVarLen
+import nl.tudelft.trustchain.common.constants.Currency
+import nl.tudelft.trustchain.common.messaging.TradePayload
+import nl.tudelft.trustchain.common.messaging.TradePayload.Type
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.util.*
 import java.math.BigInteger
+import java.nio.charset.Charset
+
+
+val FrostMessageID = 310
 
 /**
  * Message types for FROST protocol communication
  */
 enum class FrostMessageType {
-    COMMITMENT,        // Round 1: Broadcast commitment and proof
-    VERIFICATION_SHARE // Round 2: Broadcast verification share
+    COMMITMENT,        // Frost DKG Round 1: Broadcast commitment and proof
+    VERIFICATION_SHARE, // Frost DKGRound 2: Broadcast verification share
+    LEADER_BROADCAST,   // For broadcasting the leader of a shared wallet
+    FROST_NONCEPAIRS_TO_SA, //Frost Preprocessing Round 2: Broadcast nonces to SA
 }
 
-/**
- * Base message class for FROST protocol communication
- */
+class FrostPayload (
+    val messageType: FrostMessageType,
+    val sessionId: String,
+    val data: ByteArray,
+) : Serializable {
+    override fun serialize(): ByteArray {
+        return byteArrayOf(messageType.ordinal.toByte()) +
+            serializeVarLen(sessionId.toByteArray(Charsets.UTF_8)) +
+            serializeVarLen(data)
+    }
+
+    companion object Deserializer : Deserializable<FrostPayload> {
+        override fun deserialize(buffer: ByteArray, offset: Int): Pair<FrostPayload, Int> {
+            var local_offset = 0
+            val messageTypeOrinal = buffer[offset + local_offset].toInt()
+            local_offset += 1
+            var (sessionId, sessionIdSize) = deserializeVarLen(buffer, offset + local_offset)
+            local_offset += sessionIdSize
+
+            var (data, dataSize) = deserializeVarLen(buffer, offset + local_offset)
+            local_offset += dataSize
+
+            var payload = FrostPayload(
+                FrostMessageType.values()[messageTypeOrinal],
+                sessionId.toString(Charsets.UTF_8),
+                data
+            )
+            return Pair(payload, local_offset)
+        }
+
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as FrostPayload
+        if (!this.messageType.equals(other.messageType)) return false
+        if (!sessionId.equals(other.sessionId)) return false
+        if (!data.contentEquals(other.data)) return false
+
+        return true
+    }
+}
+
 class FrostMessage(
     val messageType: FrostMessageType,
     val sessionId: String,
@@ -25,7 +83,7 @@ class FrostMessage(
 
     companion object {
         // Message ID for FrostMessage handling in IPv8
-        const val ID = 1
+        const val ID = 310
 
         /**
          * Deserialize a FrostMessage from raw bytes
@@ -33,33 +91,32 @@ class FrostMessage(
         fun deserialize(buffer: ByteArray): Pair<FrostMessage, ByteArray> {
             val typeOrdinal = buffer[0].toInt()
             val messageType = FrostMessageType.values()[typeOrdinal]
-            
+
             // Read session ID (as a UUID string)
             val sessionIdBytes = ByteArray(36) // UUID string format has 36 characters
             System.arraycopy(buffer, 1, sessionIdBytes, 0, 36)
             val sessionId = String(sessionIdBytes)
-
             // Get the data payload
             val dataSize = buffer.size - 37 // Total size minus type byte and session ID
             val data = ByteArray(dataSize)
             System.arraycopy(buffer, 37, data, 0, dataSize)
-            
+
             return Pair(FrostMessage(messageType, sessionId, data), ByteArray(0))
         }
     }
 
     override fun serialize(): ByteArray {
         val outputBuffer = ByteArrayOutputStream()
-        
+
         // Write message type
         outputBuffer.write(messageType.ordinal)
-        
+
         // Write session ID (as a string)
         outputBuffer.write(sessionId.toByteArray())
-        
+
         // Write data payload
         outputBuffer.write(data)
-        
+
         return outputBuffer.toByteArray()
     }
 }
@@ -72,12 +129,12 @@ class FrostCommitmentMessage(
     val commitment: List<BigInteger>,
     val proof: Pair<BigInteger, BigInteger>
 ) : Serializable {
-    
+
     companion object {
         fun deserialize(sessionId: String, buffer: ByteArray): FrostCommitmentMessage {
             // Read the number of commitment values
             val commitmentSize = buffer[0].toInt()
-            
+
             // Read the commitment values
             val commitment = ArrayList<BigInteger>()
             var offset = 1
@@ -88,7 +145,7 @@ class FrostCommitmentMessage(
                 commitment.add(BigInteger(bytes))
                 offset += len
             }
-            
+
             // Read the proof (R, z)
             val rLen = buffer[offset].toInt()
             offset += 1
@@ -98,24 +155,24 @@ class FrostCommitmentMessage(
             val zLen = buffer[offset].toInt()
             offset += 1
             val z = BigInteger(buffer.copyOfRange(offset, offset + zLen))
-            
+
             return FrostCommitmentMessage(sessionId, commitment, Pair(r, z))
         }
     }
-    
+
     override fun serialize(): ByteArray {
         val outputBuffer = ByteArrayOutputStream()
-        
+
         // Write the number of commitment values
         outputBuffer.write(commitment.size)
-        
+
         // Write the commitment values
         for (value in commitment) {
             val bytes = value.toByteArray()
             outputBuffer.write(bytes.size)         // Write length prefix (1 byte)
             outputBuffer.write(bytes)              // Then actual bytes
         }
-        
+
         // Write the proof (R, z)
         val rBytes = proof.first.toByteArray()
         outputBuffer.write(rBytes.size)
@@ -124,12 +181,16 @@ class FrostCommitmentMessage(
         val zBytes = proof.second.toByteArray()
         outputBuffer.write(zBytes.size)
         outputBuffer.write(zBytes)
-        
+
         return outputBuffer.toByteArray()
     }
-    
-    fun toFrostMessage(): FrostMessage {
-        return FrostMessage(FrostMessageType.COMMITMENT, sessionId, this.serialize())
+
+//    fun toFrostMessage(): FrostMessage {
+//        return FrostMessage(FrostMessageType.COMMITMENT, sessionId, this.serialize())
+//    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.COMMITMENT, sessionId, this.serialize())
     }
 }
 
@@ -140,31 +201,179 @@ class FrostVerificationShareMessage(
     val sessionId: String,
     val verificationShare: BigInteger
 ) : Serializable {
-    
+
     companion object {
-        fun deserialize(sessionId: String, buffer: ByteArray): FrostVerificationShareMessage {
-            // Read the verification share
-            val verificationShareBytes = ByteArray(8)
-            System.arraycopy(buffer, 0, verificationShareBytes, 0, 8)
-            val verificationShare = BigInteger.valueOf(verificationShareBytes.toLong())
-            
-            return FrostVerificationShareMessage(sessionId, verificationShare)
-        }
+         fun deserialize(sessionId: String, buffer: ByteArray): FrostVerificationShareMessage {
+             // Read the verification share
+             val verificationShareBytes = ByteArray(8)
+             System.arraycopy(buffer, 0, verificationShareBytes, 0, 8)
+             val verificationShare = BigInteger.valueOf(verificationShareBytes.toLong())
+
+             return FrostVerificationShareMessage(sessionId, verificationShare)
+         }
     }
-    
+
     override fun serialize(): ByteArray {
         val outputBuffer = ByteArrayOutputStream()
-        
+
         // Write the verification share
         outputBuffer.write(verificationShare.toByteArray())
-        
+
         return outputBuffer.toByteArray()
     }
-    
-    fun toFrostMessage(): FrostMessage {
-        return FrostMessage(FrostMessageType.VERIFICATION_SHARE, sessionId, this.serialize())
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.VERIFICATION_SHARE, sessionId, this.serialize())
     }
 }
+
+
+/**
+ * Message for broadcasting the leader of a shared wallet
+ */
+class FrostLeaderMessage(
+    val walletId: String,
+    val sessionId: String,
+    val leaderId: String,
+) : Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+        val leaderBytes = leaderId.toByteArray(Charsets.UTF_8)
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(leaderBytes.size)
+        dos.write(leaderBytes)
+
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostLeaderMessage {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val leaderLen = dis.readInt()
+            val leaderBytes = ByteArray(leaderLen)
+            dis.readFully(leaderBytes)
+
+            val walletId = String(walletBytes, Charsets.UTF_8)
+            val sessionId = String(sessionBytes, Charsets.UTF_8)
+            val leaderId = String(leaderBytes, Charsets.UTF_8)
+
+            return FrostLeaderMessage(walletId, sessionId, leaderId)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.LEADER_BROADCAST, sessionId, this.serialize())
+    }
+}
+
+/**
+ * Message for broadcasting the leader of a shared wallet, 包含 noncePairs 列表
+ */
+class FrostNoncesToSAMessage(
+    val walletId: String,
+    val sessionId: String,
+    val leaderId: String,
+    val noncePairs: List<Pair<BigInteger, BigInteger>>,
+) : Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+        val leaderBytes = leaderId.toByteArray(Charsets.UTF_8)
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(leaderBytes.size)
+        dos.write(leaderBytes)
+
+        dos.writeInt(noncePairs.size)
+        for ((d, e) in noncePairs) {
+            val dBytes = d.toByteArray()
+            dos.writeInt(dBytes.size)
+            dos.write(dBytes)
+
+            val eBytes = e.toByteArray()
+            dos.writeInt(eBytes.size)
+            dos.write(eBytes)
+        }
+
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostNoncesToSAMessage {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val leaderLen = dis.readInt()
+            val leaderBytes = ByteArray(leaderLen)
+            dis.readFully(leaderBytes)
+
+            val walletId = walletBytes.toString(Charsets.UTF_8)
+            val sessionId = sessionBytes.toString(Charsets.UTF_8)
+            val leaderId = leaderBytes.toString(Charsets.UTF_8)
+
+            // read noncePairs length
+            val listSize = dis.readInt()
+            val noncePairs = mutableListOf<Pair<BigInteger, BigInteger>>()
+            repeat(listSize) {
+                // read d
+                val dLen = dis.readInt()
+                val dBytes = ByteArray(dLen)
+                dis.readFully(dBytes)
+                val d = BigInteger(1, dBytes)
+
+                // read e
+                val eLen = dis.readInt()
+                val eBytes = ByteArray(eLen)
+                dis.readFully(eBytes)
+                val e = BigInteger(1, eBytes)
+
+                noncePairs += Pair(d, e)
+            }
+
+            return FrostNoncesToSAMessage(walletId, sessionId, leaderId, noncePairs)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.FROST_NONCEPAIRS_TO_SA, sessionId, serialize())
+    }
+}
+
+
 
 // Helper extension to convert Long to ByteArray
 private fun Long.toByteArray(): ByteArray {
@@ -182,4 +391,5 @@ private fun ByteArray.toLong(): Long {
         result = result or ((this[i].toLong() and 0xFF) shl (i * 8))
     }
     return result
-} 
+}
+
