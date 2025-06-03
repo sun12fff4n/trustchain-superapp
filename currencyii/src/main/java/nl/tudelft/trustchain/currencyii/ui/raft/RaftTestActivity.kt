@@ -1,249 +1,263 @@
 package nl.tudelft.trustchain.currencyii.ui.raft
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import nl.tudelft.ipv8.IPv4Address
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Runnable
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.trustchain.currencyii.CoinCommunity
 import nl.tudelft.trustchain.currencyii.R
-import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
-import java.util.UUID
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule.NodeState
 
 class RaftTestActivity : AppCompatActivity() {
 
-    private lateinit var statusText: TextView
-    private lateinit var logText: TextView
-    private lateinit var peerCountText: TextView
-    private lateinit var initRaftButton: Button
-    private lateinit var addPeerButton: Button
-    private lateinit var removePeerButton: Button
-    private lateinit var forceElectionButton: Button
+    private lateinit var textDeviceId: TextView
+    private lateinit var textNetworkAddress: TextView
+    private lateinit var textRaftState: TextView
+    private lateinit var textCurrentLeader: TextView
+    private lateinit var textCurrentTerm: TextView
+    private lateinit var recyclerPeers: RecyclerView
+    private lateinit var buttonInitRaft: Button
+    private lateinit var buttonForceElection: Button
 
-    private var coinCommunity: CoinCommunity? = null
-    private var raftModule: RaftElectionModule? = null
-    private var hasInitialized = false
+    private lateinit var peerAdapter: PeerAdapter
+    private val peerUpdateHandler = Handler(Looper.getMainLooper())
+    private val updateInterval = 2000L // 2 seconds
 
-    private val messageBroker = RaftMessageBroker()
-    private val simulatedNodes = mutableListOf<SimulatedRaftNode>()
-//    private val fakePeers = mutableListOf<Peer>()
-    private val TAG = "RaftTestActivity"
+    private val coinCommunity: CoinCommunity by lazy {
+        val community = IPv8Android.getInstance().getOverlay<CoinCommunity>()
+            ?: throw IllegalStateException("CoinCommunity not found")
+        
+        // 添加引导节点
+        community.addBootstrapNodes()
+        
+        // 记录自己的网络信息
+        Log.d("NetworkInfo", "My peer ID: ${community.myPeer.mid}")
+        Log.d("NetworkInfo", "My LAN address: ${community.myPeer.lanAddress}")
+        Log.d("NetworkInfo", "My WAN address: ${community.myPeer.wanAddress}")
+        
+        community
+    }
+
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            updateRaftStatus()
+            peerUpdateHandler.postDelayed(this, updateInterval)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_raft_test)
 
-        // Initialize UI components
-        statusText = findViewById(R.id.statusText)
-        logText = findViewById(R.id.logText)
-        peerCountText = findViewById(R.id.peerCountText)
-        initRaftButton = findViewById(R.id.initRaftButton)
-        addPeerButton = findViewById(R.id.addPeerButton)
-        removePeerButton = findViewById(R.id.removePeerButton)
-//        forceElectionButton = findViewById(R.id.forceElectionButton)
+        initViews()
+        setupRecyclerView()
+        updateDeviceInfo()
 
-        // Get the CoinCommunity instance
-        coinCommunity = getCoinCommunity()
+        buttonInitRaft.setOnClickListener {
+            initializeRaft()
+        }
 
-        // Set up button click listeners
-        initRaftButton.setOnClickListener { initializeRaft() }
-        addPeerButton.setOnClickListener { addFakePeer() }
-        removePeerButton.setOnClickListener { removeFakePeer() }
-//        forceElectionButton.setOnClickListener { forceElection() }
+        buttonForceElection.setOnClickListener {
+            forceElection()
+        }
 
-        updateUI()
-        startPeriodicUIRefresh()
+        val connectHandler = Handler(Looper.getMainLooper())
+        connectHandler.postDelayed(object : Runnable {
+            override fun run() {
+                // 重新尝试添加引导节点
+                coinCommunity.addBootstrapNodes()
+                
+                // 打印当前网络状态
+                val peers = IPv8Android.getInstance().network.verifiedPeers
+                Log.d("NetworkDiscovery", "Found ${peers.size} verified peers")
+                peers.forEach { peer ->
+                    Log.d("NetworkDiscovery", "Peer: ${peer.mid}, Connected: ${peer.isConnected()}")
+                }
+                
+                connectHandler.postDelayed(this, 3000) // 每3秒执行一次
+            }
+        }, 1000) // 1秒后开始
     }
 
-    private fun getCoinCommunity(): CoinCommunity {
-        return IPv8Android.getInstance().getOverlay()
-            ?: throw IllegalStateException("CoinCommunity is not configured")
+    override fun onResume() {
+        super.onResume()
+        peerDiscoveryHandler.postDelayed(peerDiscoveryRunnable, 5000)
+        // Start the regular UI updates
+        peerUpdateHandler.postDelayed(updateRunnable, 1000) // Start after 1 second
+    }
+
+    override fun onPause() {
+        super.onPause()
+        peerDiscoveryHandler.removeCallbacks(peerDiscoveryRunnable)
+        // Remove the UI update callbacks
+        peerUpdateHandler.removeCallbacks(updateRunnable)
+    }
+
+    private fun initViews() {
+        textDeviceId = findViewById(R.id.textDeviceId)
+        textNetworkAddress = findViewById(R.id.textNetworkAddress)
+        textRaftState = findViewById(R.id.textRaftState)
+        textCurrentLeader = findViewById(R.id.textCurrentLeader)
+        textCurrentTerm = findViewById(R.id.textCurrentTerm)
+        recyclerPeers = findViewById(R.id.recyclerPeers)
+        buttonInitRaft = findViewById(R.id.buttonInitRaft)
+        buttonForceElection = findViewById(R.id.buttonForceElection)
+    }
+
+    private fun setupRecyclerView() {
+        peerAdapter = PeerAdapter()
+        recyclerPeers.apply {
+            layoutManager = LinearLayoutManager(this@RaftTestActivity)
+            adapter = peerAdapter
+        }
+    }
+
+    private fun updateDeviceInfo() {
+        val myPeer = coinCommunity.myPeer
+        textDeviceId.text = "Device ID: ${myPeer.mid}"
+        textNetworkAddress.text = "Address: ${myPeer.address}"
     }
 
     private fun initializeRaft() {
-        if(!hasInitialized){
-            synchronized(this){
-                if(!hasInitialized){
-                    // Create a new simulated node
-                    val localNode = SimulatedRaftNode("local", IPv4Address("127.0.0.1", 8444), messageBroker)
-                    val delegate = NodeCommunicationDelegate(localNode.peer, messageBroker)
-                    localNode.raftModule = RaftElectionModule(delegate, localNode.nodeId)
-
-                    // Add leader change listener
-                    localNode.raftModule.onLeaderChanged { newLeader ->
-                        runOnUiThread {
-                            logMessage("Node ${localNode.nodeId.substring(0, 5)} -> leaderChange: ${newLeader?.mid?.substring(0, 8) ?: "None"}")
-                            updateUI()
-                        }
+        if (!coinCommunity.isRaftInitialized()) {
+            coinCommunity.initializeRaftElection()
+            coinCommunity.onFrostCoordinatorChanged { isLeader, newLeader ->
+                runOnUiThread {
+                    if (isLeader) {
+                        Log.d("RaftTest", "This device became leader!")
+                    } else {
+                        Log.d("RaftTest", "Leader changed to: ${newLeader?.mid ?: "None"}")
                     }
-                    logMessage("Initialize Raft: ${localNode.nodeId.substring(0, 5)}, mid: ${localNode.peer.mid.substring(0, 8)}")
-                    simulatedNodes.add(localNode)
-                    messageBroker.registerNode(localNode)
-
-                    // Start the local node
-                    localNode.raftModule.start()
-                    hasInitialized = true
+                    updateRaftStatus()
                 }
             }
+            updateRaftStatus() // Update UI immediately after initialization
+
+            // Add all known peers from CoinCommunity
+            val peers = IPv8Android.getInstance().network.getRandomPeers(10)
+            for (peer in peers) {
+                coinCommunity.addRaftPeer(peer)
+            }
         }
-
-
     }
 
-    private fun addFakePeer() {
-        val node = SimulatedRaftNode(
-            UUID.randomUUID().toString(),
-            IPv4Address("127.0.0.${simulatedNodes.size + 1}", 8444),
-            messageBroker
-        )
+    private fun forceElection() {
+        if (coinCommunity.isRaftInitialized()) {
+            // Access the raft module and force election
+            val raftModule = coinCommunity.raftElectionModule
+            try {
+                // This is a hypothetical method - you would need to add this to your RaftElectionModule
+                // raftModule.forceNewElection()
 
-        // Delegate the message routing to the message broker
-        val delegate = NodeCommunicationDelegate(node.peer, messageBroker)
-        node.raftModule = RaftElectionModule(delegate, node.nodeId)
+                // If you don't have direct access, you can simulate a timeout
+                // which would usually trigger an election
+                val electionMethod = raftModule.javaClass.getDeclaredMethod("startElection")
+                electionMethod.isAccessible = true
+                electionMethod.invoke(raftModule)
 
-        // Add leader change listener
-        node.raftModule.onLeaderChanged { newLeader ->
+                Log.d("RaftTest", "Forced new election")
+                updateRaftStatus() // Update UI immediately after forcing an election
+            } catch (e: Exception) {
+                Log.e("RaftTest", "Failed to force election", e)
+            }
+        }
+    }
+
+    private fun updateRaftStatus() {
+        if (coinCommunity.isRaftInitialized()) {
+            val raftModule = coinCommunity.raftElectionModule
+
+            val state = try {
+                // Using reflection to get private field - you may want to expose these properly
+                val stateField = raftModule.javaClass.getDeclaredField("state")
+                stateField.isAccessible = true
+                stateField.get(raftModule) as NodeState
+            } catch (e: Exception) {
+                null
+            }
+
+            val term = try {
+                val termField = raftModule.javaClass.getDeclaredField("currentTerm")
+                termField.isAccessible = true
+                termField.get(raftModule) as Int
+            } catch (e: Exception) {
+                0
+            }
+
+            val isLeader = coinCommunity.isFrostCoordinator()
+            val leader = coinCommunity.getFrostCoordinator()
+
             runOnUiThread {
-                logMessage("Node ${node.nodeId.substring(0, 5)} -> leaderChange: ${newLeader?.mid?.substring(0, 8) ?: "None"}")
-                updateUI()
-            }
-        }
-
-        messageBroker.registerNode(node)
-
-        simulatedNodes.forEach{ existing ->
-            existing.raftModule.addPeer(node.peer)
-            node.raftModule.addPeer(existing.peer)
-        }
-        simulatedNodes.add(node)
-        node.raftModule.start()
-        logMessage("Added fake node: ${node.nodeId.substring(0, 5)}, mid: ${node.peer.mid.substring(0, 8)}")
-    }
-
-    private fun removeFakePeer() {
-        if(!hasInitialized || simulatedNodes.isEmpty()) {
-            logMessage("No node to remove")
-            return
-        }
-
-        val peerToRemove = simulatedNodes.removeAt(simulatedNodes.size - 1)
-
-        // Stop the node
-        peerToRemove.raftModule.stop()
-
-        // Remove the node from all other nodes
-        simulatedNodes.forEach { node ->
-            node.raftModule.removePeer(peerToRemove.peer)
-        }
-
-        // Remove the node from the message broker (deligate)
-        messageBroker.unregisterNode(peerToRemove)
-
-        logMessage("Removed node: ${peerToRemove.nodeId.substring(0, 5)}, mid: ${peerToRemove.peer.mid.substring(0, 8)}")
-
-        // Update the UI
-        runOnUiThread {
-            peerCountText.text = "Current node nums: ${simulatedNodes.size}"
-            updateUI()
-        }
-
-        if(simulatedNodes.isEmpty()) {
-            logMessage("No more nodes left")
-            hasInitialized = false
-        }
-    }
-
-//    private fun forceElection() {
-//        if (!hasInitialized) {
-//            logMessage("First initialize Raft before forcing an election")
-//            return
-//        }
-//
-//        // Use reflection -> startElection()
-//        try {
-//            val method = RaftElectionModule::class.java.getDeclaredMethod("startElection")
-//            method.isAccessible = true
-//            method.invoke(raftModule)
-//            logMessage("Forced election started")
-//        } catch (e: Exception) {
-//            logMessage("Failed to force election: ${e.message}")
-//        }
-//    }
-
-    private fun updatePeerCount() {
-        if (raftModule != null) {
-            val peerCount = raftModule!!.getPeers().size
-            peerCountText.text = "Current node nums: $peerCount"
-        }
-    }
-
-    private fun startPeriodicUIRefresh() {
-        CoroutineScope(Dispatchers.Main).launch {
-            while(isActive) {
-                updateUI()
-                delay(1000)
-            }
-        }
-    }
-
-    private fun updateUI() {
-        // Show local node status
-        if (simulatedNodes.isNotEmpty()) {
-            val localNode = simulatedNodes[0]
-            val currentState = when {
-                localNode.raftModule.isLeader() -> "Leader"
-                else -> "Follower"
-            }
-
-            val currentLeader = localNode.raftModule.getCurrentLeader()?.mid?.substring(0, 8) ?: "None"
-            val currentTerm = localNode.raftModule.getCurrentTerm()
-            val currentTime = System.currentTimeMillis()
-
-            // Heartbeat status
-            val lastHeartbeat = localNode.raftModule.getLastHeartbeatTime()
-            val heartbeatStatus = if (lastHeartbeat > 0) {
-                val timeSince = currentTime - lastHeartbeat
-                if (localNode.raftModule.isLeader()) {
-                    if (timeSince > 2000) "Sending heartbeat has stopped. (${timeSince}ms)" else "Sending normal: (${timeSince}ms ago)"
+                textRaftState.text = "State: ${state ?: "Unknown"}"
+                textCurrentTerm.text = "Term: $term"
+                textCurrentLeader.text = if (isLeader) {
+                    "Leader: This Device"
                 } else {
-                    if (timeSince > 2000) "Receiving heartbeat has stopped. (${timeSince}ms)" else "Reception is normal: (${timeSince}ms ago)"
+                    "Leader: ${leader?.mid ?: "None"}"
                 }
-            } else "No heartbeat received yet"
 
-            statusText.text = """
-                Status: $currentState
-                Current Term: $currentTerm
-                Leader: $currentLeader
-                Node number: ${simulatedNodes.size}
-                Heartbeat status: $heartbeatStatus
-            """.trimIndent()
-
-            // Highlight the status text if heartbeat is not received for a while
-            if (localNode.raftModule.isLeader() && lastHeartbeat > 0 &&
-                System.currentTimeMillis() - lastHeartbeat > 2000) {
-                statusText.setTextColor(resources.getColor(android.R.color.holo_red_dark))
-            } else {
-                statusText.setTextColor(resources.getColor(android.R.color.black))
+                // Update known peers in the recycler view
+                val peers = IPv8Android.getInstance().network.getRandomPeers(10)
+                for (peer in peers) {
+                    // For now, we don't know peers' Raft state, so just mark if they're in Raft
+                    peerAdapter.updatePeer(
+                        peer = peer,
+                        isInRaft = true,
+                        raftState = if (leader?.mid == peer.mid) NodeState.LEADER else NodeState.FOLLOWER
+                    )
+                }
             }
         } else {
-            statusText.text = "Raft not initialized"
+            runOnUiThread {
+                textRaftState.text = "State: Not Initialized"
+                textCurrentLeader.text = "Leader: None"
+                textCurrentTerm.text = "Term: 0"
+            }
         }
     }
 
-    private fun logMessage(message: String) {
-        Log.d(TAG, message)
-        runOnUiThread {
-            logText.append("${message}\n")
-            // Automatically scroll to the bottom
-            val scrollAmount = logText.layout?.getLineTop(logText.lineCount) ?: 0
-            logText.scrollTo(0, scrollAmount)
+    private fun discoverAndRegisterRaftPeers() {
+        // Get all verified peers from the network
+        val allPeers = IPv8Android.getInstance().network.verifiedPeers
+
+        Log.d("RaftTest", "Found ${allPeers.size} total peers")
+
+        // Since we can't directly filter by service, add all peers to Raft
+        // The Raft module will handle validating peers during the protocol
+        allPeers.forEach { peer ->
+            if (peer.isConnected()) {
+                Log.d("RaftTest", "Registering peer ${peer.mid} (${peer.address}) with Raft")
+                coinCommunity.addRaftPeer(peer)
+            } else {
+                Log.d("RaftTest", "Skipping disconnected peer ${peer.mid}")
+            }
+        }
+
+        // Also log details about all peers to help debug the 0.0.0.0 issue
+        Log.d("RaftTest", "=== PEER DETAILS ===")
+        allPeers.forEach { peer ->
+            Log.d("RaftTest", "Peer ${peer.mid}:")
+            Log.d("RaftTest", "  - Address: ${peer.address}")
+            Log.d("RaftTest", "  - LAN Address: ${peer.lanAddress}")
+            Log.d("RaftTest", "  - WAN Address: ${peer.wanAddress}")
+            Log.d("RaftTest", "  - Connected: ${peer.isConnected()}")
+            Log.d("RaftTest", "  - Last Response: ${peer.lastResponse}")
+        }
+    }
+
+    // Call this method periodically or after initialization
+    private val peerDiscoveryHandler = Handler(Looper.getMainLooper())
+    private val peerDiscoveryRunnable = object : Runnable {
+        override fun run() {
+            discoverAndRegisterRaftPeers()
+            peerDiscoveryHandler.postDelayed(this, 10000) // Every 10 seconds
         }
     }
 }

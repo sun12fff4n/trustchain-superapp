@@ -30,16 +30,6 @@ class CurrencyIIMainActivity : BaseActivity() {
         }
     }
 
-//    override fun onCreate(savedInstanceState: Bundle?) {
-//        super.onCreate(savedInstanceState)
-//
-//        // 在已有代码的基础上添加
-//        findNavController(R.id.navHostFragment).addOnDestinationChangedListener { _, destination, _ ->
-//            if (destination.id == R.id.raftTestActivity) {
-//                startActivity(Intent(this, RaftTestActivity::class.java))
-//            }
-//        }
-//    }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {

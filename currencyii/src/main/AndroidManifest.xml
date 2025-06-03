@@ -11,7 +11,13 @@
     <application>
         <activity
             android:name=".ui.raft.RaftTestActivity"
-            android:label="RaftTest"
-            android:parentActivityName=".CurrencyIIMainActivity" />
+            android:exported="true"
+            android:label="Raft Test">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
     </application>
+
 </manifest>

@@ -1,5 +1,6 @@
 package nl.tudelft.trustchain.currencyii
 
+//import nl.tudelft.trustchain.currencyii.util.frost.FrostSignatureMessage
 import android.app.Activity
 import android.content.Context
 import android.util.Log
@@ -7,30 +8,39 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import nl.tudelft.ipv8.Community
+import nl.tudelft.ipv8.IPv4Address
+import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
+import nl.tudelft.ipv8.messaging.Deserializable
+import nl.tudelft.ipv8.messaging.Packet
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
-import nl.tudelft.ipv8.Peer
-import nl.tudelft.ipv8.messaging.Packet
-import nl.tudelft.ipv8.messaging.Deserializable
-import nl.tudelft.trustchain.currencyii.sharedWallet.*
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseNegativeSignatureBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseNegativeSignatureTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseSignatureBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseSignatureTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWTransferDoneTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWTransferFundsAskBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.SWTransferFundsAskTransactionData
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
 import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
-//import nl.tudelft.trustchain.currencyii.util.frost.FrostSignatureMessage
-import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
-import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
-import java.nio.ByteBuffer
 import nl.tudelft.trustchain.currencyii.util.frost.FrostCommitmentMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostKeyGenEngine
 import nl.tudelft.trustchain.currencyii.util.frost.FrostMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
 import nl.tudelft.trustchain.currencyii.util.frost.FrostVerificationShareMessage
-import java.util.concurrent.ConcurrentHashMap
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 interface FrostSendDelegate {
     fun frostSend(peer: Peer, data: ByteArray): Unit
@@ -89,7 +99,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         // Find the corresponding key generation engine
         val engine = activeKeyGenEngines[sessionId]
-        
+
         if (engine != null) {
             CoroutineScope(Dispatchers.Default).launch {
                 when (frostMessage.messageType) {
@@ -189,6 +199,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // handle RequestVote
     private fun onRequestVote(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
+        Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}")
 
         // Handle request vote and check if the vote is granted
         val voteGranted = raftElectionModule.handleRequestVote(peer, message.term, message.candidateId)
@@ -215,6 +226,26 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         // Handle heartbeat message
         raftElectionModule.handleHeartbeat(peer, message.term, message.leaderId)
+    }
+
+    fun logRaftStatus() {
+        if (!isRaftInitialized()) {
+            Log.d("RaftDebug", "Raft not initialized")
+            return
+        }
+
+        val peers = try {
+            val peersField = raftElectionModule.javaClass.getDeclaredField("peers")
+            peersField.isAccessible = true
+            peersField.get(raftElectionModule) as Set<*>
+        } catch (e: Exception) {
+            emptySet<Any>()
+        }
+
+        Log.d("RaftDebug", "Raft has ${peers.size} registered peers")
+        peers.forEach { peer ->
+            Log.d("RaftDebug", "Raft peer: $peer")
+        }
     }
 
     /**
@@ -610,5 +641,33 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         private const val TAG = "CoinCommunity"
 
+    }
+
+    override fun walkTo(address: IPv4Address) {
+        Log.d(TAG, "Walking to address: ${address.ip}:${address.port}")
+
+        // Same IP?
+        if (address.ip == "80.112.133.253") {
+            Log.d(TAG, "Special handling for emulator WAN address with port: ${address.port}")
+        }
+
+        super.walkTo(address)
+    }
+
+    fun addBootstrapNodes() {
+        val knownAddresses = listOf(
+            IPv4Address("80.112.133.253", 60569),
+            IPv4Address("80.112.133.253", 41700),
+            IPv4Address("10.0.2.16", 8090)
+        )
+        
+        for (address in knownAddresses) {
+            try {
+                Log.d(TAG, "Adding bootstrap node: ${address.ip}:${address.port}")
+                walkTo(address)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add bootstrap node", e)
+            }
+        }
     }
 }
