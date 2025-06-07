@@ -36,20 +36,20 @@ class FrostKeyGenEngine(
     var groupPublicKey: BigInteger? = null // Group public key Y (can be computed by all)
 
     // Received commitments and verification shares from other participants
-    val commitments = ConcurrentHashMap<String, List<BigInteger>>()
-    val proofs = ConcurrentHashMap<String, Pair<BigInteger, BigInteger>>()
-    val verificationShares = ConcurrentHashMap<String, BigInteger>()
+    public val commitments = ConcurrentHashMap<String, List<BigInteger>>()
+    public val proofs = ConcurrentHashMap<String, Pair<BigInteger, BigInteger>>()
+    public val verificationShares = ConcurrentHashMap<String, BigInteger>()
 
     // Locks for synchronization
-    val commitmentsMutex = Mutex()
-    val verificationSharesMutex = Mutex()
+    public val commitmentsMutex = Mutex()
+    public val verificationSharesMutex = Mutex()
 
     // Peer ID mapping
-    val peerIdMapping = HashMap<String, Peer>()
+    public val peerIdMapping = HashMap<String, Peer>()
 
     // Secure random for better security
-    val secureRandom = SecureRandom()
-    val RESPONSE_TIMEOUT = FrostConstants.DEFAULT_TIMEOUT
+    public val secureRandom = SecureRandom()
+    public val RESPONSE_TIMEOUT = FrostConstants.DEFAULT_TIMEOUT
 
 
     init {

@@ -13,15 +13,22 @@ import kotlinx.coroutines.withContext
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.currencyii.CoinCommunity
+import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.FROST_BROADCASTING_BLOCK
 import nl.tudelft.trustchain.currencyii.R
 import nl.tudelft.trustchain.currencyii.coin.WalletManagerAndroid
 import nl.tudelft.trustchain.currencyii.databinding.FragmentJoinNetworkBinding
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostBroadcastingTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWResponseSignatureBlockTD
 import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWSignatureAskBlockTD
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseSignatureBlockTD
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskBlockTD
 import nl.tudelft.trustchain.currencyii.ui.BaseFragment
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
+import nl.tudelft.trustchain.currencyii.util.frost.FrostPayload
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToJoinerMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToSAMessage
+import java.math.BigInteger
 
 /**
  * A simple [Fragment] subclass.
@@ -274,11 +281,33 @@ class JoinDAOFragment : BaseFragment(R.layout.fragment_join_network) {
 
         val context = requireContext()
         // Wait for Frost signature
-        var frostSignature: FrostSWResponseSignatureBlockTD? = null
+        var frostSignature: BigInteger? = null
         while (frostSignature == null) {
             Thread.sleep(1000)
-            frostSignature = getFrostJoinWalletResponseIfExists(proposeBlockData)
-            Log.e("Coin", "No frost signature yet")
+            frostSignature = BigInteger.ZERO
+            val blockTDs = getTrustChainCommunity().database.getBlocksWithType(
+                FROST_BROADCASTING_BLOCK
+            )
+                .filter {
+                    val blockData = FrostBroadcastingTransactionData(it.transaction)
+                    blockData.getData().SW_UNIQUE_ID == proposeBlockData.SW_UNIQUE_ID
+                }
+                .map {
+                    FrostBroadcastingTransactionData(it.transaction).getData()
+                }
+            for (msg in blockTDs) {
+                val frostPayload = FrostPayload.deserialize(msg.SW_FROST_DATA, 0).first
+                if (frostPayload.messageType != FrostMessageType.FROST_SIGINING_TO_JOINER) {
+                    continue
+                }
+                val frostSignatureMessage = FrostSigningResponseToJoinerMessage.deserialize(frostPayload.data)
+                Log.i("Frost", "Fetched frost signature ${frostSignatureMessage.aggregateSignature} for ${frostSignatureMessage.joinerId}")
+                if (frostSignatureMessage.joinerId != java.util.Base64.getEncoder().encodeToString(getTrustChainCommunity().myPeer.publicKey.keyToBin())) {
+                    continue
+                }
+                frostSignature = frostSignatureMessage.aggregateSignature
+                break
+            }
         }
 
         // Create a new shared wallet using the frost signature

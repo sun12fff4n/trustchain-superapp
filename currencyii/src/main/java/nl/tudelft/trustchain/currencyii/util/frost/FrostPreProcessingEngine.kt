@@ -113,4 +113,12 @@ class FrostPreProcessingEngine(
     fun ifCollectAllNonces(participantNum: Int): Boolean {
         return storedNonces.size == participantNum
     }
+
+    fun getAllStoredNonces(): Map<String, List<Pair<BigInteger, BigInteger>>> {
+        val result = mutableMapOf<String, List<Pair<BigInteger, BigInteger>>>()
+        for ((peerId, nonceList) in storedNonces) {
+            result[peerId] = nonceList.toList()
+        }
+        return result
+    }
 }

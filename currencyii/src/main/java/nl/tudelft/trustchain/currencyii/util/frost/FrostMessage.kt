@@ -1,21 +1,15 @@
 package nl.tudelft.trustchain.currencyii.util.frost
 
-import android.util.Log
 import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.ipv8.messaging.Serializable
 import nl.tudelft.ipv8.messaging.deserializeVarLen
-import nl.tudelft.ipv8.messaging.serializeInt
 import nl.tudelft.ipv8.messaging.serializeVarLen
-import nl.tudelft.trustchain.common.constants.Currency
-import nl.tudelft.trustchain.common.messaging.TradePayload
-import nl.tudelft.trustchain.common.messaging.TradePayload.Type
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.util.*
 import java.math.BigInteger
-import java.nio.charset.Charset
 
 
 val FrostMessageID = 310
@@ -28,6 +22,10 @@ enum class FrostMessageType {
     VERIFICATION_SHARE, // Frost DKGRound 2: Broadcast verification share
     LEADER_BROADCAST,   // For broadcasting the leader of a shared wallet
     FROST_NONCEPAIRS_TO_SA, //Frost Preprocessing Round 2: Broadcast nonces to SA
+    FROST_NONCEPAIR_TO_PARTICIPANT, //Frost Sigining Step1: Send next pair from SA to corresponding participant
+    FROST_JOINPROPOSAL_TO_SA, //Frost Sigining Step2: Send join proposal to SA
+    FROST_SIGNING_ZI_TO_SA, //Frost Sigining Step3: Send z_i to SA
+    FROST_SIGINING_TO_JOINER, // Frost Sigining Step4: Send signature to joiner
 }
 
 class FrostPayload (
@@ -286,7 +284,7 @@ class FrostLeaderMessage(
 }
 
 /**
- * Message for broadcasting the leader of a shared wallet, 包含 noncePairs 列表
+ * Message for broadcasting the leader of a shared wallet
  */
 class FrostNoncesToSAMessage(
     val walletId: String,
@@ -393,3 +391,288 @@ private fun ByteArray.toLong(): Long {
     return result
 }
 
+/**
+ * Message for the leader to send next nonce pair when signining a proposal to corresponding participant.
+ */
+class FrostNonceToParticipantMessage(
+    val walletId: String,
+    val sessionId: String,
+    val joinerId: String,
+    val noncePairs: MutableMap<String, Pair<BigInteger, BigInteger>>,
+) : Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+        val joinerBytes = joinerId.toByteArray(Charsets.UTF_8)
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(joinerBytes.size)
+        dos.write(joinerBytes)
+
+
+        // write noncePairs length
+        dos.writeInt(noncePairs.size)
+
+        for ((peerId, noncePair) in noncePairs) {
+            // write peerId
+            val peerIdBytes = peerId.toByteArray(Charsets.UTF_8)
+            dos.writeInt(peerIdBytes.size)
+            dos.write(peerIdBytes)
+
+            // write noncePair
+            val dBytes = noncePair.first.toByteArray()
+            dos.writeInt(dBytes.size)
+            dos.write(dBytes)
+            val eBytes = noncePair.second.toByteArray()
+            dos.writeInt(eBytes.size)
+            dos.write(eBytes)
+        }
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostNonceToParticipantMessage {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val joinerLen = dis.readInt()
+            val joinerBytes = ByteArray(joinerLen)
+            dis.readFully(joinerBytes)
+
+            val walletId = walletBytes.toString(Charsets.UTF_8)
+            val sessionId = sessionBytes.toString(Charsets.UTF_8)
+            val joinerId = joinerBytes.toString(Charsets.UTF_8)
+
+            // read noncePairs length
+            val listSize = dis.readInt()
+
+            // read noncePairs
+            val noncePairs = mutableMapOf<String, Pair<BigInteger, BigInteger>>()
+            repeat(listSize) {
+                // read peer Id
+                val peerLength = dis.readInt()
+                val peerBytes = ByteArray(peerLength)
+                dis.readFully(peerBytes)
+                val peerId = peerBytes.toString(Charsets.UTF_8)
+
+                // read d
+                val dLen = dis.readInt()
+                val dBytes = ByteArray(dLen)
+                dis.readFully(dBytes)
+                val d = BigInteger(1, dBytes)
+
+                // read e
+                val eLen = dis.readInt()
+                val eBytes = ByteArray(eLen)
+                dis.readFully(eBytes)
+                val e = BigInteger(1, eBytes)
+
+                noncePairs[peerId] = Pair(d, e)
+            }
+            return FrostNonceToParticipantMessage(walletId, sessionId, joinerId, noncePairs)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.FROST_NONCEPAIR_TO_PARTICIPANT, sessionId, serialize())
+    }
+}
+
+
+
+class FrostJoinProposalToSA(
+    val walletId: String,
+    val sessionId: String,
+    val peerId: String,
+) : Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+        val peerBytes = peerId.toByteArray(Charsets.UTF_8)
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(peerBytes.size)
+        dos.write(peerBytes)
+
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostJoinProposalToSA {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val peerLen = dis.readInt()
+            val peerBytes = ByteArray(peerLen)
+            dis.readFully(peerBytes)
+
+            val walletId = walletBytes.toString(Charsets.UTF_8)
+            val sessionId = sessionBytes.toString(Charsets.UTF_8)
+            val peerId = peerBytes.toString(Charsets.UTF_8)
+
+            return FrostJoinProposalToSA(walletId, sessionId, peerId)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.FROST_JOINPROPOSAL_TO_SA, sessionId, serialize())
+    }
+}
+
+class FrostSigningResponseToSAMessage(
+    val walletId: String,
+    val sessionId: String,
+    val participantIndex: Int,
+    val z_i: BigInteger,
+): Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+
+        val z_iBytes = z_i.toByteArray()
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(participantIndex)
+        dos.writeInt(z_iBytes.size)
+        dos.write(z_iBytes)
+
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostSigningResponseToSAMessage {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val participantIndex = dis.readInt()
+
+            val z_iLen = dis.readInt()
+            val z_iBytes = ByteArray(z_iLen)
+            dis.readFully(z_iBytes)
+
+            val walletId = walletBytes.toString(Charsets.UTF_8)
+            val sessionId = sessionBytes.toString(Charsets.UTF_8)
+            val z_i = BigInteger(1, z_iBytes)
+
+            return FrostSigningResponseToSAMessage(walletId, sessionId, participantIndex, z_i)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.FROST_SIGNING_ZI_TO_SA, sessionId, serialize())
+    }
+}
+
+
+
+class FrostSigningResponseToJoinerMessage(
+    val walletId: String,
+    val sessionId: String,
+    val aggregateSignature: BigInteger,
+    val joinerId: String,
+): Serializable {
+
+    override fun serialize(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        val dos = DataOutputStream(baos)
+
+        val walletBytes = walletId.toByteArray(Charsets.UTF_8)
+        val sessionBytes = sessionId.toByteArray(Charsets.UTF_8)
+        val signatureBytes = aggregateSignature.toByteArray()
+        val joinerBytes = joinerId.toByteArray(Charsets.UTF_8)
+
+        dos.writeInt(walletBytes.size)
+        dos.write(walletBytes)
+        dos.writeInt(sessionBytes.size)
+        dos.write(sessionBytes)
+        dos.writeInt(signatureBytes.size)
+        dos.write(signatureBytes)
+        dos.writeInt(joinerBytes.size)
+        dos.write(joinerBytes)
+
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun deserialize(buffer: ByteArray): FrostSigningResponseToJoinerMessage {
+            val bais = ByteArrayInputStream(buffer)
+            val dis = DataInputStream(bais)
+
+            val walletLen = dis.readInt()
+            val walletBytes = ByteArray(walletLen)
+            dis.readFully(walletBytes)
+
+            val sessionLen = dis.readInt()
+            val sessionBytes = ByteArray(sessionLen)
+            dis.readFully(sessionBytes)
+
+            val z_iLen = dis.readInt()
+            val z_iBytes = ByteArray(z_iLen)
+            dis.readFully(z_iBytes)
+
+            val signatureLen = dis.readInt()
+            val signatureBytes = ByteArray(signatureLen)
+            dis.readFully(signatureBytes)
+
+            val joinerLen = dis.readInt()
+            val joinerBytes = ByteArray(joinerLen)
+            dis.readFully(joinerBytes)
+
+            val walletId = walletBytes.toString(Charsets.UTF_8)
+            val sessionId = sessionBytes.toString(Charsets.UTF_8)
+            val aggregateSignature = BigInteger(1, signatureBytes)
+            val joinerId = joinerBytes.toString(Charsets.UTF_8)
+
+            return FrostSigningResponseToJoinerMessage(walletId, sessionId, aggregateSignature, joinerId)
+        }
+    }
+
+    fun toFrostPayload(): FrostPayload {
+        return FrostPayload(FrostMessageType.FROST_SIGNING_ZI_TO_SA, sessionId, serialize())
+    }
+}

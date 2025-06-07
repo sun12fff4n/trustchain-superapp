@@ -9,16 +9,19 @@ import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
+import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.FROST_BROADCASTING_BLOCK
 import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.SIGNATURE_AGREEMENT_BLOCK
 import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.SIGNATURE_ASK_BLOCK
 import nl.tudelft.trustchain.currencyii.TrustChainHelper
 import nl.tudelft.trustchain.currencyii.coin.WalletManagerAndroid
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
+import nl.tudelft.trustchain.currencyii.util.frost.FrostJoinProposalToSA
 import nl.tudelft.trustchain.currencyii.util.taproot.CTransaction
 import nl.tudelft.trustchain.currencyii.util.taproot.MuSig
 import org.bitcoinj.core.Coin
 import org.bitcoinj.core.ECKey
 import java.math.BigInteger
+import java.util.Base64
 
 class DAOJoinHelper {
     private fun getTrustChainCommunity(): TrustChainCommunity {
@@ -118,12 +121,29 @@ class DAOJoinHelper {
                 requiredSignatures,
                 proposalIDSignature
             )
+        // The joiner of course doesn't know the session Id of Frost, so we set it to empty string
+        val sessionId = "IDONTKNOW"
+        getTrustChainCommunity().createBroadcastingBlock(
+            FrostBroadcastingTransactionData(
+                blockData.SW_UNIQUE_ID,
+                sessionId,
+                FrostJoinProposalToSA(
+                    walletId = blockData.SW_UNIQUE_ID,
+                    sessionId = sessionId,
+                    peerId = Base64.getEncoder().encodeToString(myPeer.publicKey.keyToBin())
+                ).toFrostPayload().serialize(),
+                Base64.getEncoder().encodeToString(myPeer.publicKey.keyToBin()),
+                sendTo = ""
+            ).getTransactionData(),
+            myPeer.publicKey.keyToBin(),
+            FROST_BROADCASTING_BLOCK
+        )
+        Log.i("Frost", "I created ${blockData.SW_UNIQUE_ID}, sessionId is ${sessionId}")
         trustchain.createProposalBlock(
             askSignatureBlockData.getJsonString(),
             myPeer.publicKey.keyToBin(),
             askSignatureBlockData.blockType
         )
-        Log.e("Fuck", "I am a pig")
         return askSignatureBlockData
     }
 
@@ -223,7 +243,8 @@ class DAOJoinHelper {
         myPeer: Peer,
         walletBlockData: TrustChainTransaction,
         blockData: FrostSWSignatureAskBlockTD,
-        response: FrostSWResponseSignatureBlockTD,
+        frostSignature: BigInteger,
+//        response: FrostSWResponseSignatureBlockTD,
         context: Context
     ) {
         val oldWalletBlockData = SWJoinBlockTransactionData(walletBlockData)
@@ -232,7 +253,7 @@ class DAOJoinHelper {
         val walletManager = WalletManagerAndroid.getInstance()
 
         // we do not need schnoor anymore, as we do all the aggregation offline in frost :)
-        val frostSignature = BigInteger(1, response.SW_FROSTSIGNATURE_SERIALIZED.hexToBytes())
+//        val frostSignature = BigInteger(1, response.SW_FROSTSIGNATURE_SERIALIZED.hexToBytes())
 
         val newTransactionProposal = newTransactionSerialized.hexToBytes()
         val cTx = CTransaction().deserialize(newTransactionProposal)
@@ -249,8 +270,6 @@ class DAOJoinHelper {
             Log.e("Coin", "Taproot transaction submission to server failed")
         }
 
-        // actually, this generates a nonce for the joiner, but is is unnecessary for frost as we generate it locally
-        // but................... I am tired.
         broadcastJoinedSharedWallet(myPeer, oldWalletBlockData, serializedTransaction, context)
     }
 

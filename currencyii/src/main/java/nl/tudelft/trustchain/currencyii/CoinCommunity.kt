@@ -20,12 +20,17 @@ import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
 import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
 import nl.tudelft.trustchain.currencyii.util.frost.FrostCommitmentMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostJoinProposalToSA
 import nl.tudelft.trustchain.currencyii.util.frost.FrostKeyGenEngine
 import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
 import nl.tudelft.trustchain.currencyii.util.frost.FrostNoncesToSAMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostPayload
 import nl.tudelft.trustchain.currencyii.util.frost.FrostPreProcessingEngine
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSiginingEngine
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToSAMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostVerificationShareMessage
+import org.ethereum.geth.BigInt
+import java.math.BigInteger
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Base64
 import java.util.LinkedList
@@ -44,16 +49,15 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     private val activeKeyGenEngines = ConcurrentHashMap<String, ConcurrentHashMap<String, FrostKeyGenEngine>>()
     private val activePreProcessingEngine = ConcurrentHashMap<String, ConcurrentHashMap<String, FrostPreProcessingEngine>>()
 
+    public var currentFrostKeyGenEngine: FrostKeyGenEngine? = null
+    public var currentFrostPreprocessingEngine: FrostPreProcessingEngine? = null
+
     // record the id of message we have processed
     private var processedMessages = HashSet<String>()
 
     // send function for frost
     override fun frostSend(peer: Peer, data: ByteArray): Unit {
         return send(peer, data)
-    }
-
-    init {
-
     }
 
     // Register a new FROST key generation engine
@@ -169,6 +173,8 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         }
     }
 
+    var frostSigningEngine :FrostSiginingEngine? = null;
+
     /**
      * Create a bitcoin genesis wallet and broadcast the result on trust chain.
      * The bitcoin transaction may take some time to finish.
@@ -203,6 +209,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
                 )
             }
         )
+        this.currentFrostKeyGenEngine = frostKeyGenEngine
         frostKeyGenEngine.initialize()
 
         // the only participant, namely the creator, is ofc the leader.
@@ -212,7 +219,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             leaderId = Base64.getEncoder().encodeToString(myPeer.publicKey.keyToBin()),
             isLeader = true,
             participantIndex = 0,
-            pi = 5,
+            pi = 10,
             broadcast = { payload ->
                 frostPreprocessingSendToLeaderFuncTemplate(
                     walletId, sessionId,
@@ -222,6 +229,21 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             }
         )
         registerFrostPreProcessingEngine(walletId, sessionId, frostPreprocessingEngine)
+        this.currentFrostPreprocessingEngine = frostPreprocessingEngine
+
+        this.frostSigningEngine = FrostSiginingEngine(
+            isLeader = true,
+            participantIndex = 0,
+            pi = 10,
+            walletId = walletId,
+            sessionId = sessionId,
+            leaderId = Base64.getEncoder().encodeToString(myPeer.publicKey.keyToBin()),
+            broadcast = {
+                payload -> frostBroadcasting( walletId, sessionId, payload )
+            },
+            threshold = threshold,
+            myPeer = myPeer,
+        )
 
         frostKeyGenEngine.sessionId = ret.getData().SW_UNIQUE_ID
         registerFrostKeyGenEngine(walletId, sessionId, frostKeyGenEngine)
@@ -236,6 +258,63 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         CoroutineScope(Dispatchers.Default).launch {
             frostProprocessingEngineLaunchDKGFetcher(walletId, sessionId, 1)
+            Log.i("Frost", "I try to migrate this")
+            frostSigningEngine!!.setStorednNonces(frostPreprocessingEngine.storedNonces)
+            Log.i("Frost", "I finished to migrate this, now i have ${frostSigningEngine!!.storedNonces.size}")
+        }
+
+        CoroutineScope(Dispatchers.Default).launch {
+            while (true) {
+                var exitLoop = false
+                Thread.sleep(1000)
+
+                Log.i("FrostMonitor", "I am looking for ${walletId}")
+                val broadcastMsgs = fetchFrostBroadcastingBlock(walletId, "IDONTKNOW")
+                for (msg in broadcastMsgs) {
+                    if (msg.SW_UNIQUE_ID != walletId) {
+                        continue
+                    }
+                    if (msg.SW_SESSION_ID != "IDONTKNOW") {
+                        continue
+                    }
+                    val frostPayload = FrostPayload.deserialize(msg.SW_FROST_DATA, 0).first
+                    Log.i("FrostMonitor", "Fetched broadcasting blocks for wallet Id ${msg.SW_UNIQUE_ID} and session ${msg.SW_SESSION_ID}")
+
+                    val joinerID = FrostJoinProposalToSA.deserialize(frostPayload.data).peerId
+                    frostSigningEngine!!.sign(joinerID)
+
+
+                    CoroutineScope(Dispatchers.Default).launch {
+                        while (!frostSigningEngine!!.signed) {
+                            val msgs = fetchFrostBroadcastingBlock(walletId, sessionId)
+                            Log.i("FrostSigining", "I fetched ${msgs.size} broadcasting blocks for session $sessionId")
+                            for (msg in msgs) {
+                                if (msg.SW_UNIQUE_ID != walletId) {
+                                    continue
+                                }
+                                val frostPayload = FrostPayload.deserialize(msg.SW_FROST_DATA, 0).first
+                                if (frostPayload.messageType != FrostMessageType.FROST_SIGNING_ZI_TO_SA) {
+                                    continue
+                                }
+                                val frostZiToSA = FrostSigningResponseToSAMessage.deserialize(frostPayload.data)
+                                Log.i("FrostSigining", "I received ${frostZiToSA.z_i} from participant: {${frostZiToSA.participantIndex}")
+                                frostSigningEngine!!.onReceivedZiFromParticipant(
+                                    frostZiToSA.participantIndex,
+                                    frostZiToSA.z_i,
+                                    joinerID
+                                )
+                            }
+                            Thread.sleep(1000)
+                        }
+                    }
+
+                    exitLoop = true
+                    break
+                }
+                if (exitLoop) {
+                    break
+                }
+            }
         }
 
         return ret
@@ -299,14 +378,14 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     fun joinBitcoinWalletFrost(
         walletBlockData: TrustChainTransaction,
         blockData: FrostSWSignatureAskBlockTD,
-        response: FrostSWResponseSignatureBlockTD,
+        frostSignature: BigInteger,
         context: Context
     ) {
         daoJoinHelper.joinBitcoinWalletFrost(
             myPeer,
             walletBlockData,
             blockData,
-            response,
+            frostSignature,
             context
         )
     }
@@ -550,15 +629,6 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
                 FrostBroadcastingTransactionData(it.transaction).getData()
             }
     }
-//        val res = getTrustChainCommunity().database.getBlocksWithType(FROST_BROADCASTING_BLOCK)
-//            .filter {
-//                val blockData = FrostBroadcastingTransactionData(it.transaction)
-//                blockData.matchesSession(walletId, sessionId)
-//            }
-//            .map {
-//                FrostBroadcastingTransactionData(it.transaction).getData()
-//            }
-//    }
 
     /**
      * Fetch all DAO blocks that contain a negative signature. These blocks are the response of a negative signature request.
