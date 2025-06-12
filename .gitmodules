@@ -1,1 +1,5 @@
 
+[submodule "kotlin-ipv8"]
+	path = kotlin-ipv8
+	url = https://github.com/120L021101/kotlin-ipv8.git
+	branch = compatibility
