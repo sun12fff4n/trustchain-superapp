@@ -91,8 +91,11 @@ class RaftElectionModule(
 
             restartElectionTimeout()
 
-            peers.forEach {
-                peer -> sendRequestVoteMessage(peer)
+            // Avoid ConcurrentModificationException
+            val peersCopy = peers.toSet()
+
+            peersCopy.forEach { peer ->
+                sendRequestVoteMessage(peer)
             }
         }
     }
@@ -209,7 +212,9 @@ class RaftElectionModule(
     }
 
     private fun sendHeartbeats() {
-        peers.forEach { peer ->
+        val peersCopy = peers.toSet()
+
+        peersCopy.forEach { peer ->
             sendHeartbeatMessage(peer)
         }
     }
