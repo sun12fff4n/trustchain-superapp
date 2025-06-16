@@ -198,6 +198,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
     // handle RequestVote
     private fun onRequestVote(packet: Packet) {
+        Log.d("RaftMsg", "Now handling RequestVote message: ${packet.data.size} bytes")
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
         Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}")
 
@@ -660,7 +661,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             IPv4Address("80.112.133.253", 41700),
             IPv4Address("10.0.2.16", 8090)
         )
-        
+
         for (address in knownAddresses) {
             try {
                 Log.d(TAG, "Adding bootstrap node: ${address.ip}:${address.port}")
@@ -670,4 +671,15 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             }
         }
     }
+
+//    override fun onDemultiplexPacket(
+//        sourceAddress: IPv4Address,
+//        data: ByteArray,
+//        peer: Peer?
+//    ): Boolean {
+//        Log.d("PacketDebug", "Received original data package: ${data.size} bytes, from: $sourceAddress")
+//        val result = super.onDemultiplexPacket(sourceAddress, data, peer)
+//        Log.d("PacketDebug", "Package handling result: $result")
+//        return result
+//    }
 }
