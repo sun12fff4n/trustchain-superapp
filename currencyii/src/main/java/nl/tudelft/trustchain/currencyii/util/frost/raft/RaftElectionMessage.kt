@@ -9,9 +9,9 @@ sealed class RaftElectionMessage : Serializable {
 
     companion object {
         // Message type identifiers
-        const val REQUEST_VOTE_ID = 1
-        const val VOTE_RESPONSE_ID = 2
-        const val HEARTBEAT_ID = 3
+        const val REQUEST_VOTE_ID = 325
+        const val VOTE_RESPONSE_ID = 326
+        const val HEARTBEAT_ID = 327
 
         // Unified Processing Entry
         fun deserialize(buffer: ByteArray): RaftElectionMessage {

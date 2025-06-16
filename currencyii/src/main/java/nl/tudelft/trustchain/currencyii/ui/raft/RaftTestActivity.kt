@@ -266,15 +266,15 @@ class RaftTestActivity : AppCompatActivity() {
         }
 
         // Also log details about all peers to help debug the 0.0.0.0 issue
-        Log.d("RaftTest", "=== PEER DETAILS ===")
-        allPeers.forEach { peer ->
-            Log.d("RaftTest", "Peer ${peer.mid}:")
-            Log.d("RaftTest", "  - Address: ${peer.address}")
-            Log.d("RaftTest", "  - LAN Address: ${peer.lanAddress}")
-            Log.d("RaftTest", "  - WAN Address: ${peer.wanAddress}")
-            Log.d("RaftTest", "  - Connected: ${peer.isConnected()}")
-            Log.d("RaftTest", "  - Last Response: ${peer.lastResponse}")
-        }
+//        Log.d("RaftTest", "=== PEER DETAILS ===")
+//        allPeers.forEach { peer ->
+//            Log.d("RaftTest", "Peer ${peer.mid}:")
+//            Log.d("RaftTest", "  - Address: ${peer.address}")
+//            Log.d("RaftTest", "  - LAN Address: ${peer.lanAddress}")
+//            Log.d("RaftTest", "  - WAN Address: ${peer.wanAddress}")
+//            Log.d("RaftTest", "  - Connected: ${peer.isConnected()}")
+//            Log.d("RaftTest", "  - Last Response: ${peer.lastResponse}")
+//        }
     }
 
     // Call this method periodically or after initialization

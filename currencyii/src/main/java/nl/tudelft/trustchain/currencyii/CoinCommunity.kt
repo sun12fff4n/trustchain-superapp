@@ -79,7 +79,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 //        messageHandlers[FrostSignatureMessage.REQUEST_SIGNATURE_ID] = { packet -> onFrostSignatureRequest(packet.peer, packet.data) }
 //        messageHandlers[FrostSignatureMessage.SIGNATURE_RESULT_ID] = { packet -> onFrostSignatureResult(packet.peer, packet.data) }
 //        messageHandlers[FrostSignatureMessage.SIGNATURE_ERROR_ID] = { packet -> onFrostSignatureError(packet.peer, packet.data) }
-        messageHandlers[FrostMessage.ID] = ::onFrostMessage
+//        messageHandlers[FrostMessage.ID] = ::onFrostMessage
     }
 
     private fun onFrostMessage(packet: Packet) {
@@ -645,12 +645,12 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     }
 
     override fun walkTo(address: IPv4Address) {
-        Log.d(TAG, "Walking to address: ${address.ip}:${address.port}")
-
-        // Same IP?
-        if (address.ip == "80.112.133.253") {
-            Log.d(TAG, "Special handling for emulator WAN address with port: ${address.port}")
-        }
+//        Log.d(TAG, "Walking to address: ${address.ip}:${address.port}")
+//
+//        // Same IP?
+//        if (address.ip == "80.112.133.253") {
+//            Log.d(TAG, "Special handling for emulator WAN address with port: ${address.port}")
+//        }
 
         super.walkTo(address)
     }
@@ -672,14 +672,26 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         }
     }
 
-//    override fun onDemultiplexPacket(
-//        sourceAddress: IPv4Address,
-//        data: ByteArray,
-//        peer: Peer?
-//    ): Boolean {
-//        Log.d("PacketDebug", "Received original data package: ${data.size} bytes, from: $sourceAddress")
-//        val result = super.onDemultiplexPacket(sourceAddress, data, peer)
-//        Log.d("PacketDebug", "Package handling result: $result")
-//        return result
-//    }
+    @OptIn(ExperimentalStdlibApi::class)
+    override fun onPacket(packet: Packet) {
+        val sourceAddress = packet.source
+        val data = packet.data
+
+        Log.d("RaftDebug", "收到数据包: ${data.size}字节, 来源: $sourceAddress")
+
+        // 检查前缀
+        val packetPrefix = data.copyOfRange(0, prefix.size)
+        val prefixMatch = packetPrefix.contentEquals(prefix)
+        Log.d("RaftDebug", "前缀匹配: $prefixMatch, 期望: ${prefix.toHexString()}, 实际: ${packetPrefix.toHexString()}")
+
+        if (!prefixMatch) {
+            return
+        }
+
+        // 提取消息ID
+        val msgId = data[prefix.size].toUByte().toInt()
+        Log.d("RaftDebug", "消息ID: $msgId, 已注册处理器: ${messageHandlers.containsKey(msgId)}")
+
+        super.onPacket(packet)
+    }
 }
