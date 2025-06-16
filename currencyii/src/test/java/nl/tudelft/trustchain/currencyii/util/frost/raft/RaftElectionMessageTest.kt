@@ -50,7 +50,7 @@ class RaftElectionMessageTest {
     @Test
     fun testDeserializeWiresharkCapture() {
         // Wireshark captured hex data
-        val hexString = "010000008c00000062346361353031392d373333382d343336622d383034392d363334663436613332393161"
+        val hexString = "000202313685c1912a141279f8248fc8db5899c5df5b"
 
         // Convert hex string to byte array
         val bytes = hexStringToByteArray(hexString)

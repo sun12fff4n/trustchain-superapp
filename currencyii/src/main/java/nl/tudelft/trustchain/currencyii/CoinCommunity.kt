@@ -679,6 +679,13 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         Log.d("RaftDebug", "收到数据包: ${data.size}字节, 来源: $sourceAddress")
 
+        if (sourceAddress.toString() == "145.94.199.74"){
+            val hexDump = data.joinToString("") {
+                String.format("%02X", it.toInt() and 0xFF)
+            }
+            Log.d("RaftDebug", "数据包完整内容(十六进制): $hexDump")
+        }
+
         // 检查前缀
         val packetPrefix = data.copyOfRange(0, prefix.size)
         val prefixMatch = packetPrefix.contentEquals(prefix)
