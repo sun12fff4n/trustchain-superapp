@@ -16,6 +16,7 @@ import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
 import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.ipv8.messaging.Packet
+import nl.tudelft.ipv8.messaging.payload.IntroductionResponsePayload
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTD
@@ -72,15 +73,9 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
     // receive callback for frost
     init {
-//        messageHandlers[FrostMessage.ID] = ::onFrostMessage
         messageHandlers[RaftElectionMessage.REQUEST_VOTE_ID] = ::onRequestVote
         messageHandlers[RaftElectionMessage.VOTE_RESPONSE_ID] = ::onVoteResponse
         messageHandlers[RaftElectionMessage.HEARTBEAT_ID] = ::onHeartbeat
-
-//        messageHandlers[FrostSignatureMessage.REQUEST_SIGNATURE_ID] = { packet -> onFrostSignatureRequest(packet.peer, packet.data) }
-//        messageHandlers[FrostSignatureMessage.SIGNATURE_RESULT_ID] = { packet -> onFrostSignatureResult(packet.peer, packet.data) }
-//        messageHandlers[FrostSignatureMessage.SIGNATURE_ERROR_ID] = { packet -> onFrostSignatureError(packet.peer, packet.data) }
-//        messageHandlers[FrostMessage.ID] = ::onFrostMessage
     }
 
     private fun onFrostMessage(packet: Packet) {
@@ -199,25 +194,17 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
     // handle RequestVote
     private fun onRequestVote(packet: Packet) {
-        Log.d("RaftMsg", "Now handling RequestVote message: ${packet.data.size} bytes")
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
-        Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}")
+        Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}. Delegating to Raft module.")
 
-        // Handle request vote and check if the vote is granted
-        val voteGranted = raftElectionModule.handleRequestVote(peer, message.term, message.candidateId)
-
-        // Send vote response
-        val response = RaftElectionMessage.VoteResponse(
-            raftElectionModule.getCurrentTerm(),
-            voteGranted
-        )
-        val responsePacket = serializePacket(RaftElectionMessage.VOTE_RESPONSE_ID, response)
-        send(peer, responsePacket)
+        // Simply delegate the entire handling to the Raft module
+        raftElectionModule.handleRequestVote(peer, message)
     }
 
     // Handle VoteResponse
     private fun onVoteResponse(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.VoteResponse)
+        Log.d("RaftMsg", "Received VoteResponse from ${peer.mid}, term=${message.term}, granted=${message.voteGranted}. Delegating to Raft module.")
 
         // Handle vote response
         raftElectionModule.handleVoteResponse(peer, message.term, message.voteGranted)
@@ -226,6 +213,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // Handle Heartbeat
     private fun onHeartbeat(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.Heartbeat)
+        Log.d("RaftMsg", "Received Heartbeat from ${peer.mid}, term=${message.term}, leaderId=${message.leaderId}. Delegating to Raft module.")
 
         // Handle heartbeat message
         raftElectionModule.handleHeartbeat(peer, message.term, message.leaderId)
@@ -644,6 +632,13 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         private const val TAG = "CoinCommunity"
 
+        private val RAFT_MEMBER_MIDS = setOf(
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // MID of Node 1
+        )
+
+        private var raftInitialized = false
+
+
     }
 
     override fun walkTo(address: IPv4Address) {
@@ -703,4 +698,47 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 //
 //        super.onPacket(packet)
 //    }
+
+    /**
+     * Checks if all predefined Raft members have been discovered and, if so,
+     * initializes and starts the Raft module.
+     */
+
+    /****************************************
+     * **************************************
+     * ***********pseudocode*****************
+     * *******Not Runnable Code**************
+     * **************************************
+     * **************************************
+     */
+    private fun tryToFormRaftCluster() {
+        // Prevent multiple initializations
+        if (raftInitialized) return
+
+        // We only care about peers that are designated Raft members
+        val allKnownPeers = network.getPeers()
+        val foundRaftPeers = allKnownPeers.filter { it.mid in RAFT_MEMBER_MIDS }
+
+        Log.d(TAG, "Attempting to form Raft cluster. Found ${foundRaftPeers.size}/${RAFT_MEMBER_MIDS.size} members.")
+
+        // Have we discovered all the members?
+        if (foundRaftPeers.size == RAFT_MEMBER_MIDS.size) {
+            Log.d(TAG, "All Raft members discovered. Initializing Raft module.")
+            raftInitialized = true
+
+            // The Raft module needs the full list of participants, including self.
+            // Note: `foundRaftPeers` already includes our own peer if it was discovered by others,
+            // but adding it ensures it's always there.
+            val fullCluster = (foundRaftPeers + myPeer).distinctBy { it.mid }
+
+            setupAndStartRaft(fullCluster)
+        }
+    }
+    /****************************************
+     * **************************************
+     * ***********pseudocode*****************
+     * *******Not Runnable Code**************
+     * **************************************
+     * **************************************
+     */
 }

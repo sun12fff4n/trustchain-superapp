@@ -37,10 +37,10 @@ class RaftTestActivity : AppCompatActivity() {
         val community = IPv8Android.getInstance().getOverlay<CoinCommunity>()
             ?: throw IllegalStateException("CoinCommunity not found")
 
-        // 添加引导节点
+        // Add bootstrap nodes if not already done
         community.addBootstrapNodes()
 
-        // 记录自己的网络信息
+        // Record own peer information
         Log.d("NetworkInfo", "My peer ID: ${community.myPeer.mid}")
         Log.d("NetworkInfo", "My LAN address: ${community.myPeer.lanAddress}")
         Log.d("NetworkInfo", "My WAN address: ${community.myPeer.wanAddress}")
@@ -74,19 +74,19 @@ class RaftTestActivity : AppCompatActivity() {
         val connectHandler = Handler(Looper.getMainLooper())
         connectHandler.postDelayed(object : Runnable {
             override fun run() {
-                // 重新尝试添加引导节点
+                // Try to add bootstrap nodes if not already done
                 coinCommunity.addBootstrapNodes()
 
-                // 打印当前网络状态
+                // Print network information
                 val peers = IPv8Android.getInstance().network.verifiedPeers
                 Log.d("NetworkDiscovery", "Found ${peers.size} verified peers")
                 peers.forEach { peer ->
                     Log.d("NetworkDiscovery", "Peer: ${peer.mid}, Connected: ${peer.isConnected()}")
                 }
 
-                connectHandler.postDelayed(this, 3000) // 每3秒执行一次
+                connectHandler.postDelayed(this, 3000) // per 3 seconds
             }
-        }, 1000) // 1秒后开始
+        }, 1000) // start after 1 second
     }
 
     override fun onResume() {
@@ -265,16 +265,6 @@ class RaftTestActivity : AppCompatActivity() {
             }
         }
 
-        // Also log details about all peers to help debug the 0.0.0.0 issue
-//        Log.d("RaftTest", "=== PEER DETAILS ===")
-//        allPeers.forEach { peer ->
-//            Log.d("RaftTest", "Peer ${peer.mid}:")
-//            Log.d("RaftTest", "  - Address: ${peer.address}")
-//            Log.d("RaftTest", "  - LAN Address: ${peer.lanAddress}")
-//            Log.d("RaftTest", "  - WAN Address: ${peer.wanAddress}")
-//            Log.d("RaftTest", "  - Connected: ${peer.isConnected()}")
-//            Log.d("RaftTest", "  - Last Response: ${peer.lastResponse}")
-//        }
     }
 
     // Call this method periodically or after initialization
