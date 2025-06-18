@@ -12,6 +12,30 @@ sealed class RaftElectionMessage : Serializable {
         const val REQUEST_VOTE_ID = 125
         const val VOTE_RESPONSE_ID = 126
         const val HEARTBEAT_ID = 127
+
+
+        // For test
+        fun deserialize(buffer: ByteArray): RaftElectionMessage {
+            val byteBuffer = ByteBuffer.wrap(buffer)
+            byteBuffer.order(ByteOrder.LITTLE_ENDIAN)
+            val messageType = byteBuffer.getInt()
+
+            return when (messageType) {
+                REQUEST_VOTE_ID -> {
+                    val (message, _) = RequestVote.deserialize(buffer, 4)
+                    message
+                }
+                VOTE_RESPONSE_ID -> {
+                    val (message, _) = VoteResponse.deserialize(buffer, 4)
+                    message
+                }
+                HEARTBEAT_ID -> {
+                    val (message, _) = Heartbeat.deserialize(buffer, 4)
+                    message
+                }
+                else -> throw IllegalArgumentException("RaftElectionMessage: Unknown type - $messageType")
+            }
+        }
     }
 
     class RequestVote(

@@ -7,7 +7,14 @@ import nl.tudelft.ipv8.android.keyvault.AndroidCryptoProvider
 import nl.tudelft.trustchain.currencyii.RaftSendDelegate
 import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
 import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
+
+/**
+ * Simluate on single device
+ * SimulatedRaftNode represents a node in a simulated Raft cluster.
+ */
 class SimulatedRaftNode(
     val nodeId: String,
     val address: IPv4Address,
@@ -23,7 +30,14 @@ class SimulatedRaftNode(
                 val granted = raftModule.handleRequestVote(from, message.term, message.candidateId)
                 val response = RaftElectionMessage.VoteResponse(raftModule.getCurrentTerm(), granted)
                 Log.d("SimulatedRaftNode", "Received vote request from ${from.mid.substring(0, 8)}: term=${message.term}, candidateId=${message.candidateId}, granted=$granted")
-                messageBroker.routeMessage(peer, from, response.serialize())
+
+                // Manually construct the packet format for the response
+                val responsePayloadBytes = response.serialize()
+                val buffer = ByteBuffer.allocate(4 + responsePayloadBytes.size)
+                buffer.order(ByteOrder.LITTLE_ENDIAN)
+                buffer.putInt(RaftElectionMessage.VOTE_RESPONSE_ID)
+                buffer.put(responsePayloadBytes)
+                messageBroker.routeMessage(peer, from, buffer.array())
             }
             is RaftElectionMessage.Heartbeat -> {
                 Log.d("SimulatedRaftNode", "Received heartbeat from ${from.mid.substring(0, 8)}: term=${message.term}")
@@ -62,7 +76,18 @@ class NodeCommunicationDelegate(
     override val myPeer: Peer,
     private val messageBroker: RaftMessageBroker
 ) : RaftSendDelegate {
-    override fun raftSend(peer: Peer, data: ByteArray) {
-        messageBroker.routeMessage(myPeer, peer, data)
+    override fun raftSend(
+        peer: Peer,
+        messageId: Int,
+        payload: nl.tudelft.ipv8.messaging.Serializable
+    ) {
+        // Manually construct the packet format that the test harness expects.
+        // [4-byte message ID][payload bytes]
+        val payloadBytes = payload.serialize()
+        val buffer = ByteBuffer.allocate(4 + payloadBytes.size)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(messageId)
+        buffer.put(payloadBytes)
+        messageBroker.routeMessage(myPeer, peer, buffer.array())
     }
 }
