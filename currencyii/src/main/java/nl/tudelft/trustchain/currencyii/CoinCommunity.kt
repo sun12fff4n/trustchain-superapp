@@ -674,33 +674,33 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         }
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
-    override fun onPacket(packet: Packet) {
-        val sourceAddress = packet.source
-        val data = packet.data
-
-        Log.d("RaftDebug", "收到数据包: ${data.size}字节, 来源: $sourceAddress")
-
-        if (sourceAddress.toString() == "145.94.199.74:61284"){
-            val hexDump = data.joinToString("") {
-                String.format("%02X", it.toInt() and 0xFF)
-            }
-            Log.d("RaftDebug", "数据包完整内容(十六进制): $hexDump")
-        }
-
-        // 检查前缀
-        val packetPrefix = data.copyOfRange(0, prefix.size)
-        val prefixMatch = packetPrefix.contentEquals(prefix)
-        Log.d("RaftDebug", "前缀匹配: $prefixMatch, 期望: ${prefix.toHexString()}, 实际: ${packetPrefix.toHexString()}")
-
-        if (!prefixMatch) {
-            return
-        }
-
-        // 提取消息ID
-        val msgId = data[prefix.size].toUByte().toInt()
-        Log.d("RaftDebug", "消息ID: $msgId, 已注册处理器: ${messageHandlers.containsKey(msgId)}")
-
-        super.onPacket(packet)
-    }
+//    @OptIn(ExperimentalStdlibApi::class)
+//    override fun onPacket(packet: Packet) {
+//        val sourceAddress = packet.source
+//        val data = packet.data
+//
+//        Log.d("RaftDebug", "收到数据包: ${data.size}字节, 来源: $sourceAddress")
+//
+//        if (sourceAddress.toString() == "145.94.199.74:61284"){
+//            val hexDump = data.joinToString("") {
+//                String.format("%02X", it.toInt() and 0xFF)
+//            }
+//            Log.d("RaftDebug", "数据包完整内容(十六进制): $hexDump")
+//        }
+//
+//        // 检查前缀
+//        val packetPrefix = data.copyOfRange(0, prefix.size)
+//        val prefixMatch = packetPrefix.contentEquals(prefix)
+//        Log.d("RaftDebug", "前缀匹配: $prefixMatch, 期望: ${prefix.toHexString()}, 实际: ${packetPrefix.toHexString()}")
+//
+//        if (!prefixMatch) {
+//            return
+//        }
+//
+//        // 提取消息ID
+//        val msgId = data[prefix.size].toUByte().toInt()
+//        Log.d("RaftDebug", "消息ID: $msgId, 已注册处理器: ${messageHandlers.containsKey(msgId)}")
+//
+//        super.onPacket(packet)
+//    }
 }

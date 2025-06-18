@@ -108,6 +108,7 @@ class RaftElectionModule(
     }
 
     fun handleRequestVote(peer: Peer, term: Int, candidateId: String): Boolean {
+        Log.d(TAG, "${getSelfNodeIdDisplay()}: Handling request vote from ${getNodeIdDisplay(peer)} for term $term, candidateId=$candidateId")
         synchronized(this) {
             if(term < currentTerm){
                 Log.d(TAG, "${getSelfNodeIdDisplay()}: Rejected vote for $candidateId: term $term < currentTerm $currentTerm")
