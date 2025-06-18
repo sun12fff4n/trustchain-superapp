@@ -12,30 +12,6 @@ sealed class RaftElectionMessage : Serializable {
         const val REQUEST_VOTE_ID = 125
         const val VOTE_RESPONSE_ID = 126
         const val HEARTBEAT_ID = 127
-
-        // Unified Processing Entry
-        fun deserialize(buffer: ByteArray): RaftElectionMessage {
-            val byteBuffer = ByteBuffer.wrap(buffer)
-            byteBuffer.order(ByteOrder.LITTLE_ENDIAN)
-            val messageType = byteBuffer.getInt()
-
-            return when (messageType) {
-                REQUEST_VOTE_ID -> {
-                    val (message, _) = RequestVote.deserialize(buffer, 4)
-                    message
-                }
-                VOTE_RESPONSE_ID -> {
-                    val (message, _) = VoteResponse.deserialize(buffer, 4)
-                    message
-                }
-                HEARTBEAT_ID -> {
-                    val (message, _) = Heartbeat.deserialize(buffer, 4)
-                    message
-                }
-                else -> throw IllegalArgumentException("RaftElectionMessage: Unknown type - $messageType")
-            }
-        }
-
     }
 
     class RequestVote(
@@ -44,9 +20,10 @@ sealed class RaftElectionMessage : Serializable {
     ) : RaftElectionMessage() {
         override fun serialize(): ByteArray {
             val candidateIdBytes = candidateId.toByteArray(Charsets.UTF_8)
-            val buffer = ByteBuffer.allocate(4 + 4 + candidateIdBytes.size)
+            // Allocate buffer without the message type ID
+            val buffer = ByteBuffer.allocate(4 + candidateIdBytes.size)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
-            buffer.putInt(REQUEST_VOTE_ID) // Message type
+            // DO NOT write the message type ID here
             buffer.putInt(term)
             buffer.put(candidateIdBytes)
             return buffer.array()
@@ -75,9 +52,10 @@ sealed class RaftElectionMessage : Serializable {
         val voteGranted: Boolean
     ) : RaftElectionMessage() {
         override fun serialize(): ByteArray {
-            val buffer = ByteBuffer.allocate(4 + 4 + 1)
+            // Allocate buffer without the message type ID
+            val buffer = ByteBuffer.allocate(4 + 1)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
-            buffer.putInt(VOTE_RESPONSE_ID) // Message type
+            // DO NOT write the message type ID here
             buffer.putInt(term)
             buffer.put(if (voteGranted) 1.toByte() else 0.toByte())
             return buffer.array()
@@ -103,9 +81,10 @@ sealed class RaftElectionMessage : Serializable {
     ) : RaftElectionMessage() {
         override fun serialize(): ByteArray {
             val leaderIdBytes = leaderId.toByteArray(Charsets.UTF_8)
-            val buffer = ByteBuffer.allocate(4 + 4 + leaderIdBytes.size)
+            // Allocate buffer without the message type ID
+            val buffer = ByteBuffer.allocate(4 + leaderIdBytes.size)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
-            buffer.putInt(HEARTBEAT_ID) // Message type
+            // DO NOT write the message type ID here
             buffer.putInt(term)
             buffer.put(leaderIdBytes)
             return buffer.array()

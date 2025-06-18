@@ -47,7 +47,7 @@ interface FrostSendDelegate {
 }
 
 interface RaftSendDelegate {
-    fun raftSend(peer: Peer, data: ByteArray): Unit
+    fun raftSend(peer: Peer, messageId: Int, payload: nl.tudelft.ipv8.messaging.Serializable)
     val myPeer: Peer
 }
 
@@ -65,8 +65,9 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     }
 
     // send function for raft
-    override fun raftSend(peer: Peer, data: ByteArray): Unit {
-        return send(peer, data)
+    override fun raftSend(peer: Peer, messageId: Int, payload: nl.tudelft.ipv8.messaging.Serializable) {
+        val packet = serializePacket(messageId, payload)
+        send(peer, packet)
     }
 
     // receive callback for frost
@@ -210,7 +211,8 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             raftElectionModule.getCurrentTerm(),
             voteGranted
         )
-        send(peer, response.serialize())
+        val responsePacket = serializePacket(RaftElectionMessage.VOTE_RESPONSE_ID, response)
+        send(peer, responsePacket)
     }
 
     // Handle VoteResponse
@@ -679,7 +681,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         Log.d("RaftDebug", "收到数据包: ${data.size}字节, 来源: $sourceAddress")
 
-        if (sourceAddress.toString() == "145.94.199.74"){
+        if (sourceAddress.toString() == "145.94.199.74:61284"){
             val hexDump = data.joinToString("") {
                 String.format("%02X", it.toInt() and 0xFF)
             }

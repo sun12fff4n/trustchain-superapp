@@ -103,7 +103,7 @@ class RaftElectionModule(
     private fun sendRequestVoteMessage(peer: Peer) {
         // Use Community to send message
         val message = RaftElectionMessage.RequestVote(currentTerm, nodeId)
-        community.raftSend(peer, message.serialize())
+        community.raftSend(peer, RaftElectionMessage.REQUEST_VOTE_ID, message)
         Log.d(TAG, "Node ${getSelfNodeIdDisplay()} Sent RequestVote to ${getNodeIdDisplay(peer)} for term $currentTerm")
     }
 
@@ -221,7 +221,7 @@ class RaftElectionModule(
 
     private fun sendHeartbeatMessage(peer: Peer) {
         val message = RaftElectionMessage.Heartbeat(currentTerm, nodeId)
-        community.raftSend(peer, message.serialize())
+        community.raftSend(peer, RaftElectionMessage.HEARTBEAT_ID, message)
         lastHeartbeatTime = System.currentTimeMillis()
         Log.d(TAG, "${getSelfNodeIdDisplay()}: Send heartbeat to ${getNodeIdDisplay(peer)}, term=$currentTerm")
     }
