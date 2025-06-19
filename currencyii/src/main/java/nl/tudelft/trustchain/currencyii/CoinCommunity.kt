@@ -641,7 +641,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         private const val TAG = "CoinCommunity"
 
         private val RAFT_MEMBER_MIDS = setOf(
-            "2e27c6e73f596c30a3b5d0eaa8023a90385e9313",
+            "80d119411e2e6effeebc9f17683be536aed46915",
             "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // MID of Node 1
         )
 
