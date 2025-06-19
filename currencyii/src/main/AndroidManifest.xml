@@ -18,6 +18,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ui.raft.RaftTestLocalActivity"
+            android:exported="true"
+            android:label="Raft Local Test">
+        </activity>
     </application>
 
 </manifest>

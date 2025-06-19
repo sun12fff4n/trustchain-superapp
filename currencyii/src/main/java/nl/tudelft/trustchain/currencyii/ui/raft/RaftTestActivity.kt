@@ -1,5 +1,6 @@
 package nl.tudelft.trustchain.currencyii.ui.raft
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -61,6 +62,13 @@ class RaftTestActivity : AppCompatActivity() {
 
         // Start a periodic task to ensure connection to bootstrap nodes.
         uiUpdateHandler.post(bootstrapConnectionRunnable)
+
+        // Bind navigation logic
+        val localTestButton: Button = findViewById(R.id.buttonLocalTest)
+        localTestButton.setOnClickListener {
+            val intent = Intent(this@RaftTestActivity, RaftTestLocalActivity::class.java)
+            startActivity(intent)
+        }
     }
 
     override fun onResume() {

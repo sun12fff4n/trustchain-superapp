@@ -236,31 +236,41 @@ class RaftElectionModule(
     }
 
     // Heartbeat Receiver
-    fun handleHeartbeat(peer: Peer, term: Int, leaderId: String) {
-        synchronized(this) {
-            Log.d(TAG, "${getSelfNodeIdDisplay()}: Receiver heartbeat from ${getNodeIdDisplay(peer)}，term=$term")
-            if(term < currentTerm) {
-                return
+    /**
+     * Handles an incoming heartbeat from a peer claiming to be the leader.
+     */
+    fun handleHeartbeat(from: Peer, term: Int, leaderId: String) {
+        lastHeartbeatTime = System.currentTimeMillis()
+        Log.d(TAG, "[$nodeId] Received heartbeat from ${from.mid.substring(0, 5)} for term $term")
+
+        if (term >= currentTerm) {
+            val oldLeader = currentLeader
+            val wasNotFollower = currentState != NodeState.FOLLOWER
+
+            if (term > currentTerm) {
+                Log.d(TAG, "[$nodeId] Heartbeat from new leader, updating term to $term")
+                currentTerm = term
+                votedFor = null
             }
 
-            if(term > currentTerm) {
-                Log.d(TAG, "${getSelfNodeIdDisplay()}: Recv-heart: ${getNodeIdDisplay(peer)}, term $term, while local term $currentTerm, follow it")
-                becomeFollower(term)
+            if (wasNotFollower) {
+                Log.d(TAG, "[$nodeId] Reverting to follower state.")
+                currentState = NodeState.FOLLOWER
+                heartbeatJob?.cancel()
             }
 
-            // Does not take part in election
-            // but received heartbeat
-            currentState = NodeState.FOLLOWER
+            currentLeader = from
 
-            if(currentLeader != peer) {
-                currentLeader = peer
-                Log.d(TAG, "${getSelfNodeIdDisplay()}: New leader: ${getNodeIdDisplay(peer)} for term $term")
-                onLeaderChangedCallback?.invoke(peer)
+            // Only invoke the callback if the leader has actually changed or the node just became a follower.
+            if (currentLeader != oldLeader || wasNotFollower) {
+                Log.d(TAG, "[$nodeId] New leader: ${currentLeader?.mid?.substring(0, 8)} for term $currentTerm")
+                onLeaderChangedCallback?.invoke(currentLeader)
             }
-            lastHeartbeatTime = System.currentTimeMillis()
 
+            // CRITICAL: Reset the election timeout to prevent this node from starting a new election.
             restartElectionTimeout()
-
+        } else {
+            Log.w(TAG, "[$nodeId] Ignored heartbeat from old term $term (current is $currentTerm)")
         }
     }
 
