@@ -455,6 +455,38 @@ class WalletManager(
         return Pair(sendTaprootTransaction(newTransaction), newTransaction.serialize().toHex())
     }
 
+
+    /**
+     * (2.2.frost) You are the proposer. You have collected the needed signatures and
+     * will make the final transaction.
+     * @param frostSignatureFromOldOwners frost signature (from the OLD owners only, in correct order)
+     * @param newTransaction SendRequest
+     * @return Pair<Boolean, String> - successfully send the transaction, serializedTransaction
+     */
+    fun safeSendingJoinWalletTransactionWithFrost(
+        frostSignatureFromOldOwners: BigInteger,
+        newTransaction: CTransaction
+    ): Pair<Boolean, String> {
+        Log.i("Coin", "Coin: (safeSendingJoinWalletTransactionWithFrost start).")
+        Log.i("Coin", "Coin: make the new final transaction for the new wallet (FROST).")
+
+        val schnorrSignature = frostSignatureFromOldOwners.toByteArray()
+        val cTxInWitness = CTxInWitness(arrayOf(schnorrSignature))
+        val cTxWitness = CTxWitness(Array(newTransaction.vin.size) { CTxInWitness() })
+
+        val index = newTransaction.vin.indexOfFirst { it.scriptSig.isEmpty() }.takeIf { it >= 0 } ?: 0
+        cTxWitness.vtxinwit[index] = cTxInWitness
+
+        newTransaction.wit = cTxWitness
+
+        Log.i(
+            "Coin",
+            "Joining DAO (FROST) - serialized new tx with signature: " + newTransaction.serialize().toHex()
+        )
+
+        return Pair(sendTaprootTransaction(newTransaction), newTransaction.serialize().toHex())
+    }
+
     /**
      * (3.1) There is a set-up multi-sig wallet and a proposal, create a signature
      * for the proposal.

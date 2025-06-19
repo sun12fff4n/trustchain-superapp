@@ -72,6 +72,7 @@ dependencies {
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
+    testImplementation project(':ipv8') // needed for FROST test to run
     testImplementation "io.mockk:mockk:$mockk_version"
     androidTestImplementation "androidx.test.ext:junit:$android_junit_version"
 
@@ -113,4 +114,17 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
     kotlinOptions.freeCompilerArgs += [
             "-opt-in=kotlin.ExperimentalUnsignedTypes"
     ]
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        showStandardStreams true
+    }
 }

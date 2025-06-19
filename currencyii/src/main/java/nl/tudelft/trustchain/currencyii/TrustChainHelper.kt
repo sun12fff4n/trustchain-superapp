@@ -64,6 +64,28 @@ class TrustChainHelper(
     }
 
     /**
+     * Create a new Frost Block, using a broadcasted message as transaction context
+     */
+    fun createFrostBroadcastBlock(
+        message: String,
+        publicKey: ByteArray,
+        blockType: String = "v1DAO_FROST_BROADCASTING"
+    ) {
+        val transaction = mapOf("message" to message)
+        trustChainCommunity.createBroadcastingBlock(transaction, publicKey, blockType)
+    }
+
+    /**
+     * Create a new Frost Block, using a broadcasted message as transaction context
+     */
+    fun createFrostBroadcastBlock(
+        transaction: TrustChainTransaction,
+        publicKey: ByteArray,
+        blockType: String = "v1DAO_FROST_BROADCASTING"
+    ): TrustChainBlock  {
+        return trustChainCommunity.createBroadcastingBlock(transaction, publicKey, blockType)
+    }
+        /**
      * Creates an agreement block to a specified proposal block, using a custom transaction.
      */
     fun createAgreementBlock(
