@@ -9,17 +9,25 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import kotlinx.coroutines.Runnable
-import nl.tudelft.ipv8.Community
 import nl.tudelft.ipv8.android.IPv8Android
-import nl.tudelft.ipv8.messaging.Packet
 import nl.tudelft.trustchain.currencyii.CoinCommunity
 import nl.tudelft.trustchain.currencyii.R
-import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
 import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule.NodeState
 
+/**
+ * An activity for testing and observing the Raft election protocol within the CoinCommunity.
+ *
+ * This screen provides:
+ * - Information about the local device and its network status.
+ * - The current state of the Raft module (State, Term, Leader).
+ * - A list of discovered peers participating in the Raft cluster.
+ * - Controls to initialize Raft and force a new election.
+ */
 class RaftTestActivity : AppCompatActivity() {
 
+    // --- Properties ---
+
+    // UI Components
     private lateinit var textDeviceId: TextView
     private lateinit var textNetworkAddress: TextView
     private lateinit var textRaftState: TextView
@@ -29,31 +37,17 @@ class RaftTestActivity : AppCompatActivity() {
     private lateinit var buttonInitRaft: Button
     private lateinit var buttonForceElection: Button
 
+    // Adapters and Handlers
     private lateinit var peerAdapter: PeerAdapter
-    private val peerUpdateHandler = Handler(Looper.getMainLooper())
-    private val updateInterval = 2000L // 2 seconds
+    private val uiUpdateHandler = Handler(Looper.getMainLooper())
 
+    // IPv8 and Community
     private val coinCommunity: CoinCommunity by lazy {
-        val community = IPv8Android.getInstance().getOverlay<CoinCommunity>()
+        IPv8Android.getInstance().getOverlay<CoinCommunity>()
             ?: throw IllegalStateException("CoinCommunity not found")
-
-        // Add bootstrap nodes if not already done
-        community.addBootstrapNodes()
-
-        // Record own peer information
-        Log.d("NetworkInfo", "My peer ID: ${community.myPeer.mid}")
-        Log.d("NetworkInfo", "My LAN address: ${community.myPeer.lanAddress}")
-        Log.d("NetworkInfo", "My WAN address: ${community.myPeer.wanAddress}")
-
-        community
     }
 
-    private val updateRunnable = object : Runnable {
-        override fun run() {
-            updateRaftStatus()
-            peerUpdateHandler.postDelayed(this, updateInterval)
-        }
-    }
+    // --- Lifecycle Methods ---
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,48 +55,32 @@ class RaftTestActivity : AppCompatActivity() {
 
         initViews()
         setupRecyclerView()
+        setupClickListeners()
+
         updateDeviceInfo()
 
-        buttonInitRaft.setOnClickListener {
-            initializeRaft()
-        }
-
-        buttonForceElection.setOnClickListener {
-            forceElection()
-        }
-
-        val connectHandler = Handler(Looper.getMainLooper())
-        connectHandler.postDelayed(object : Runnable {
-            override fun run() {
-                // Try to add bootstrap nodes if not already done
-                coinCommunity.addBootstrapNodes()
-
-                // Print network information
-                val peers = IPv8Android.getInstance().network.verifiedPeers
-                Log.d("NetworkDiscovery", "Found ${peers.size} verified peers")
-                peers.forEach { peer ->
-                    Log.d("NetworkDiscovery", "Peer: ${peer.mid}, Connected: ${peer.isConnected()}")
-                }
-
-                connectHandler.postDelayed(this, 3000) // per 3 seconds
-            }
-        }, 1000) // start after 1 second
+        // Start a periodic task to ensure connection to bootstrap nodes.
+        uiUpdateHandler.post(bootstrapConnectionRunnable)
     }
 
     override fun onResume() {
         super.onResume()
-        peerDiscoveryHandler.postDelayed(peerDiscoveryRunnable, 5000)
-        // Start the regular UI updates
-        peerUpdateHandler.postDelayed(updateRunnable, 1000) // Start after 1 second
+        // Start periodic UI updates.
+        uiUpdateHandler.post(uiUpdateRunnable)
+        // uiUpdateHandler.post(peerDiscoveryRunnable)
     }
 
     override fun onPause() {
         super.onPause()
-        peerDiscoveryHandler.removeCallbacks(peerDiscoveryRunnable)
-        // Remove the UI update callbacks
-        peerUpdateHandler.removeCallbacks(updateRunnable)
+        // Stop all periodic tasks to prevent background work and memory leaks.
+        uiUpdateHandler.removeCallbacksAndMessages(null)
     }
 
+    // --- UI Setup ---
+
+    /**
+     * Initializes all UI views from the layout file.
+     */
     private fun initViews() {
         textDeviceId = findViewById(R.id.textDeviceId)
         textNetworkAddress = findViewById(R.id.textNetworkAddress)
@@ -114,6 +92,9 @@ class RaftTestActivity : AppCompatActivity() {
         buttonForceElection = findViewById(R.id.buttonForceElection)
     }
 
+    /**
+     * Sets up the RecyclerView with its adapter and layout manager.
+     */
     private fun setupRecyclerView() {
         peerAdapter = PeerAdapter()
         recyclerPeers.apply {
@@ -122,157 +103,180 @@ class RaftTestActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Configures the click listeners for the buttons.
+     */
+    private fun setupClickListeners() {
+        buttonInitRaft.setOnClickListener {
+            initializeRaft()
+        }
+
+        buttonForceElection.setOnClickListener {
+            forceNewElection()
+        }
+    }
+
+    // --- Raft Logic ---
+
+    /**
+     * Initializes the Raft election module in the CoinCommunity if it hasn't been already.
+     * For this test setup, it attempts to form a cluster using a predefined list of peers.
+     */
+    private fun initializeRaft() {
+        if (coinCommunity.isRaftInitialized()) {
+            Log.d("RaftTest", "Raft is already initialized.")
+            return
+        }
+
+        Log.d("RaftTest", "Attempting to form Raft cluster with predefined members...")
+        Log.d("RaftTest", "Current mid: ${coinCommunity.myPeer.mid}")
+        // This will check if all hardcoded peers are found and initialize Raft if they are.
+        coinCommunity.tryToFormRaftCluster()
+
+        // Register a callback to update the UI whenever the leader changes.
+        coinCommunity.onFrostCoordinatorChanged { isLeader, newLeader ->
+            runOnUiThread {
+                Log.d("RaftTest", "Leader changed. Is self leader: $isLeader, New leader: ${newLeader?.mid ?: "None"}")
+                updateRaftStatus()
+            }
+        }
+        updateRaftStatus() // Update UI immediately after initialization.
+    }
+
+    /**
+     * Triggers a new Raft election. This is useful for testing the election process.
+     */
+    private fun forceNewElection() {
+        if (!coinCommunity.isRaftInitialized()) {
+            Log.w("RaftTest", "Cannot force election: Raft is not initialized.")
+            return
+        }
+
+        try {
+            Log.d("RaftTest", "Forcing a new election...")
+            // Call the public method on the module to start an election.
+            // This avoids using reflection to call a private method.
+            coinCommunity.raftElectionModule.forceNewElection()
+            updateRaftStatus() // Update UI immediately.
+        } catch (e: Exception) {
+            Log.e("RaftTest", "Failed to force election", e)
+        }
+    }
+
+    // --- UI Updates ---
+
+    /**
+     * Displays static information about the local device's peer.
+     */
     private fun updateDeviceInfo() {
         val myPeer = coinCommunity.myPeer
         textDeviceId.text = "Device ID: ${myPeer.mid}"
         textNetworkAddress.text = "Address: ${myPeer.address}"
     }
 
-    private fun initializeRaft() {
-        if (!coinCommunity.isRaftInitialized()) {
-            coinCommunity.initializeRaftElection()
-            coinCommunity.onFrostCoordinatorChanged { isLeader, newLeader ->
-                runOnUiThread {
-                    if (isLeader) {
-                        Log.d("RaftTest", "This device became leader!")
-                    } else {
-                        Log.d("RaftTest", "Leader changed to: ${newLeader?.mid ?: "None"}")
-                    }
-                    updateRaftStatus()
-                }
-            }
-            updateRaftStatus() // Update UI immediately after initialization
-
-            // Add all known peers from CoinCommunity
-            val peers = IPv8Android.getInstance().network.getRandomPeers(10)
-            for (peer in peers) {
-                coinCommunity.addRaftPeer(peer)
-            }
-
-            val messageInterceptor = { packet: Packet ->
-                val messageType = when {
-                    packet.data.size >= 4 && packet.data[0].toInt() == RaftElectionMessage.REQUEST_VOTE_ID -> "Request Vote"
-                    packet.data.size >= 4 && packet.data[0].toInt() == RaftElectionMessage.VOTE_RESPONSE_ID -> "Vote Response"
-                    packet.data.size >= 4 && packet.data[0].toInt() == RaftElectionMessage.HEARTBEAT_ID -> "Heartbeat"
-                    else -> "Unknown message"
-                }
-
-                Log.d("RaftInterceptor", "Intercept $messageType message, from: ${packet.source}")
-                false // Continue processing the packet
-            }
-
-            try {
-                val field = Community::class.java.getDeclaredField("packetInterceptors")
-                field.isAccessible = true
-                @Suppress("UNCHECKED_CAST")
-                val interceptors = field.get(coinCommunity) as ArrayList<(Packet) -> Boolean>
-                interceptors.add(messageInterceptor)
-            } catch (e: Exception) {
-                Log.e("RaftTest", "Failed to add intercepter", e)
-            }
-        }
-    }
-
-    private fun forceElection() {
-        if (coinCommunity.isRaftInitialized()) {
-            // Access the raft module and force election
-            val raftModule = coinCommunity.raftElectionModule
-            try {
-                // This is a hypothetical method - you would need to add this to your RaftElectionModule
-                // raftModule.forceNewElection()
-
-                // If you don't have direct access, you can simulate a timeout
-                // which would usually trigger an election
-                val electionMethod = raftModule.javaClass.getDeclaredMethod("startElection")
-                electionMethod.isAccessible = true
-                electionMethod.invoke(raftModule)
-
-                Log.d("RaftTest", "Forced new election")
-                updateRaftStatus() // Update UI immediately after forcing an election
-            } catch (e: Exception) {
-                Log.e("RaftTest", "Failed to force election", e)
-            }
-        }
-    }
-
+    /**
+     * Fetches the current status from the Raft module and updates the UI text views.
+     * This function now uses public getters, avoiding reflection.
+     */
     private fun updateRaftStatus() {
-        if (coinCommunity.isRaftInitialized()) {
-            val raftModule = coinCommunity.raftElectionModule
-
-            val state = try {
-                // Using reflection to get private field - you may want to expose these properly
-                val stateField = raftModule.javaClass.getDeclaredField("state")
-                stateField.isAccessible = true
-                stateField.get(raftModule) as NodeState
-            } catch (e: Exception) {
-                null
-            }
-
-            val term = try {
-                val termField = raftModule.javaClass.getDeclaredField("currentTerm")
-                termField.isAccessible = true
-                termField.get(raftModule) as Int
-            } catch (e: Exception) {
-                0
-            }
-
-            val isLeader = coinCommunity.isFrostCoordinator()
-            val leader = coinCommunity.getFrostCoordinator()
-
-            runOnUiThread {
-                textRaftState.text = "State: ${state ?: "Unknown"}"
-                textCurrentTerm.text = "Term: $term"
-                textCurrentLeader.text = if (isLeader) {
-                    "Leader: This Device"
-                } else {
-                    "Leader: ${leader?.mid ?: "None"}"
-                }
-
-                // Update known peers in the recycler view
-                val peers = IPv8Android.getInstance().network.getRandomPeers(10)
-                for (peer in peers) {
-                    // For now, we don't know peers' Raft state, so just mark if they're in Raft
-                    peerAdapter.updatePeer(
-                        peer = peer,
-                        isInRaft = true,
-                        raftState = if (leader?.mid == peer.mid) NodeState.LEADER else NodeState.FOLLOWER
-                    )
-                }
-            }
-        } else {
+        if (!coinCommunity.isRaftInitialized()) {
             runOnUiThread {
                 textRaftState.text = "State: Not Initialized"
                 textCurrentLeader.text = "Leader: None"
                 textCurrentTerm.text = "Term: 0"
             }
+            return
         }
-    }
 
-    private fun discoverAndRegisterRaftPeers() {
-        // Get all verified peers from the network
-        val allPeers = IPv8Android.getInstance().network.verifiedPeers
+        val raftModule = coinCommunity.raftElectionModule
+        val state = raftModule.getCurrentState()
+        val term = raftModule.getCurrentTerm()
+        val isLeader = raftModule.isLeader()
+        val leader = raftModule.getCurrentLeader()
 
-        Log.d("RaftTest", "Found ${allPeers.size} total peers")
-
-        // Since we can't directly filter by service, add all peers to Raft
-        // The Raft module will handle validating peers during the protocol
-        allPeers.forEach { peer ->
-            if (peer.isConnected()) {
-                Log.d("RaftTest", "Registering peer ${peer.mid} (${peer.address}) with Raft")
-                coinCommunity.addRaftPeer(peer)
+        runOnUiThread {
+            textRaftState.text = "State: $state"
+            textCurrentTerm.text = "Term: $term"
+            textCurrentLeader.text = if (isLeader) {
+                "Leader: This Device"
             } else {
-                Log.d("RaftTest", "Skipping disconnected peer ${peer.mid}")
+                "Leader: ${leader?.mid ?: "None"}"
+            }
+
+            // Update the list of peers known to the Raft module.
+            // This provides a more accurate view of the cluster than getting random peers.
+            val raftPeers = raftModule.getPeers()
+            val allKnownPeers = (raftPeers + coinCommunity.myPeer).distinctBy { it.mid }
+            allKnownPeers.forEach { peer ->
+                peerAdapter.updatePeer(
+                    peer = peer,
+                    isInRaft = true,
+                    raftState = if (leader?.mid == peer.mid) NodeState.LEADER else NodeState.FOLLOWER
+                )
             }
         }
-
     }
 
-    // Call this method periodically or after initialization
-    private val peerDiscoveryHandler = Handler(Looper.getMainLooper())
-    private val peerDiscoveryRunnable = object : Runnable {
+    // --- Peer Discovery and Management ---
+
+    /**
+     * Discovers verified peers from the IPv8 network and registers them with the Raft module.
+     * This allows the Raft cluster to form dynamically as peers connect.
+     */
+    // private fun discoverAndRegisterRaftPeers() {
+    //     if (!coinCommunity.isRaftInitialized()) return
+
+    //     val allPeers = IPv8Android.getInstance().network.verifiedPeers
+    //     Log.d("RaftTest", "Peer discovery found ${allPeers.size} verified peers.")
+
+    //     allPeers.forEach { peer ->
+    //         // Add all connected peers to the Raft module.
+    //         // The module will handle them as part of the cluster.
+    //         if (peer.isConnected()) {
+    //             Log.d("RaftTest", "Registering peer ${peer.mid} with Raft.")
+    //             coinCommunity.addRaftPeer(peer)
+    //         }
+    //     }
+    // }
+
+    // --- Handlers and Runnables ---
+
+    /**
+     * A runnable task that periodically updates the UI with the latest Raft status.
+     */
+    private val uiUpdateRunnable = object : Runnable {
         override fun run() {
-            discoverAndRegisterRaftPeers()
-            peerDiscoveryHandler.postDelayed(this, 10000) // Every 10 seconds
+            updateRaftStatus()
+            uiUpdateHandler.postDelayed(this, 2000L) // Update every 2 seconds
+        }
+    }
+
+    /**
+     * A runnable task that periodically discovers and registers new peers with the Raft module.
+     */
+    // private val peerDiscoveryRunnable = object : Runnable {
+    //     override fun run() {
+    //         discoverAndRegisterRaftPeers()
+    //         uiUpdateHandler.postDelayed(this, 10000L) // Discover every 10 seconds
+    //     }
+    // }
+
+    /**
+     * A runnable task that periodically attempts to connect to bootstrap nodes
+     * and logs network information for debugging.
+     */
+    private val bootstrapConnectionRunnable = object : Runnable {
+        override fun run() {
+            Log.d("NetworkDiscovery", "Attempting to connect to bootstrap nodes...")
+            coinCommunity.addBootstrapNodes()
+
+            val peers = IPv8Android.getInstance().network.verifiedPeers
+            Log.d("NetworkDiscovery", "Found ${peers.size} verified peers.")
+            peers.forEach { peer ->
+                Log.d("NetworkDiscovery", "Peer: ${peer.mid}, Connected: ${peer.isConnected()}")
+            }
+
+            uiUpdateHandler.postDelayed(this, 5000L) // Retry every 5 seconds
         }
     }
 }

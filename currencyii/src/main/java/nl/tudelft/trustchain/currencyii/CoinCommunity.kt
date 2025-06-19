@@ -16,7 +16,6 @@ import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
 import nl.tudelft.ipv8.messaging.Deserializable
 import nl.tudelft.ipv8.messaging.Packet
-import nl.tudelft.ipv8.messaging.payload.IntroductionResponsePayload
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTD
@@ -144,16 +143,24 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     val raftElectionModule: RaftElectionModule
         get() {
             if (_raftElectionModule == null) {
-                initializeRaftElection()
+                // Note: Lazy initialization without peers might not be ideal
+                // depending on the exact startup flow.
+                // Consider initializing only when peers are known.
+                initializeRaftElection(emptyList())
             }
             return _raftElectionModule!!
         }
 
     fun isRaftInitialized(): Boolean = _raftElectionModule != null
 
-    fun initializeRaftElection() {
+    fun initializeRaftElection(clusterPeers: Collection<Peer>) {
         if (_raftElectionModule == null) {
             _raftElectionModule = RaftElectionModule(this)
+
+            // Add all peers to the module
+            clusterPeers.forEach { peer ->
+                _raftElectionModule?.addPeer(peer)
+            }
 
             // Set up leader change callback
             _raftElectionModule?.onLeaderChanged { newLeader ->
@@ -163,6 +170,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             }
 
             _raftElectionModule?.start()
+            Log.d(TAG, "RaftElectionModule initialized with ${clusterPeers.size} peers.")
         }
     }
 
@@ -633,6 +641,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         private const val TAG = "CoinCommunity"
 
         private val RAFT_MEMBER_MIDS = setOf(
+            "2e27c6e73f596c30a3b5d0eaa8023a90385e9313",
             "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", // MID of Node 1
         )
 
@@ -702,21 +711,18 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     /**
      * Checks if all predefined Raft members have been discovered and, if so,
      * initializes and starts the Raft module.
+     * This should be called periodically or when a new peer is discovered.
      */
-
-    /****************************************
-     * **************************************
-     * ***********pseudocode*****************
-     * *******Not Runnable Code**************
-     * **************************************
-     * **************************************
-     */
-    private fun tryToFormRaftCluster() {
+    fun tryToFormRaftCluster() {
         // Prevent multiple initializations
-        if (raftInitialized) return
+        if (isRaftInitialized()) {
+            Log.d(TAG, "Raft is already initialized. Skipping cluster formation.")
+            return
+        }
 
-        // We only care about peers that are designated Raft members
-        val allKnownPeers = network.getPeers()
+        // We only care about peers that are designated Raft members.
+        // getPeers() only returns remote peers. We must add our own peer to the list for a complete check.
+        val allKnownPeers = getPeers() + myPeer
         val foundRaftPeers = allKnownPeers.filter { it.mid in RAFT_MEMBER_MIDS }
 
         Log.d(TAG, "Attempting to form Raft cluster. Found ${foundRaftPeers.size}/${RAFT_MEMBER_MIDS.size} members.")
@@ -724,14 +730,13 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         // Have we discovered all the members?
         if (foundRaftPeers.size == RAFT_MEMBER_MIDS.size) {
             Log.d(TAG, "All Raft members discovered. Initializing Raft module.")
-            raftInitialized = true
 
-            // The Raft module needs the full list of participants, including self.
-            // Note: `foundRaftPeers` already includes our own peer if it was discovered by others,
-            // but adding it ensures it's always there.
+            // The Raft module needs the full list of participants.
+            // `myPeer` is implicitly part of the community delegate, but we can be explicit.
             val fullCluster = (foundRaftPeers + myPeer).distinctBy { it.mid }
 
-            setupAndStartRaft(fullCluster)
+            // Call the modified initialization function
+            initializeRaftElection(fullCluster)
         }
     }
     /****************************************

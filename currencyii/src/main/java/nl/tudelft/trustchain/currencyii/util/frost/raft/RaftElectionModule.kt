@@ -103,6 +103,13 @@ class RaftElectionModule(
 
     fun getCurrentLeader(): Peer? = currentLeader
 
+    fun getCurrentState(): NodeState = currentState
+
+    fun forceNewElection() {
+        Log.d(TAG, "${getSelfNodeIdDisplay()}: A new election is being forced.")
+        startElection()
+    }
+
     /**
      * State Changes
      * 
