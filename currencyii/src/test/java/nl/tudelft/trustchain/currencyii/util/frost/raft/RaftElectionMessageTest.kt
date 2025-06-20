@@ -3,109 +3,133 @@ package nl.tudelft.trustchain.currencyii.util.frost.raft
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class RaftElectionMessageTest {
 
     @Test
-    fun testRequestVoteSerializeDeserialize() {
-        // Create test data
-        val term = 42
-        val candidateId = "node123"
-        val originalMessage = RaftElectionMessage.RequestVote(term, candidateId)
+    fun `RequestVote payload should serialize and deserialize correctly`() {
+        // This test verifies the payload-only serialization and deserialization.
+        val originalMessage = RaftElectionMessage.RequestVote(42, "node123")
 
-        // Serialize
-        val serialized = originalMessage.serialize()
+        // Serialize the payload
+        val payloadBytes = originalMessage.serialize()
 
-        // Directly deserialize (skipping the 4 bytes of type identifier)
-        val (deserializedMessage, consumed) = RaftElectionMessage.RequestVote.deserialize(serialized, 4)
+        // Deserialize the payload starting from offset 0
+        val (deserializedMessage, consumed) = RaftElectionMessage.RequestVote.deserialize(payloadBytes, 0)
 
-        // Verify
-        assertEquals(term, deserializedMessage.term, "Term value should match")
-        assertEquals(candidateId, deserializedMessage.candidateId, "CandidateId should match")
+        // Verify content
+        assertEquals(originalMessage.term, deserializedMessage.term)
+        assertEquals(originalMessage.candidateId, deserializedMessage.candidateId)
 
-        // Verify the number of bytes consumed
-        assertEquals(4 + candidateId.toByteArray(Charsets.UTF_8).size, consumed, "Number of bytes consumed should be correct")
+        // Verify consumed bytes matches payload size
+        assertEquals(payloadBytes.size, consumed)
     }
 
     @Test
-    fun testRequestVoteGeneralDeserialization() {
-        // Create test data
-        val term = 42
-        val candidateId = "node123"
-        val originalMessage = RaftElectionMessage.RequestVote(term, candidateId)
+    fun `RequestVote full packet should deserialize correctly`() {
+        // This test verifies the general deserialization for a full packet (ID + payload).
+        val originalMessage = RaftElectionMessage.RequestVote(42, "node123")
 
-        // Serialize
-        val serialized = originalMessage.serialize()
+        // Serialize the payload
+        val payloadBytes = originalMessage.serialize()
 
-        // General deserialization method
-        val deserializedMessage = RaftElectionMessage.deserialize(serialized)
+        // Manually construct the full packet with message ID
+        val buffer = ByteBuffer.allocate(4 + payloadBytes.size)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(RaftElectionMessage.REQUEST_VOTE_ID)
+        buffer.put(payloadBytes)
+        val fullPacket = buffer.array()
+
+        // Use the general deserialize method
+        val deserializedMessage = RaftElectionMessage.deserialize(fullPacket)
 
         // Verify type and values
         assertTrue(deserializedMessage is RaftElectionMessage.RequestVote)
         val requestVote = deserializedMessage as RaftElectionMessage.RequestVote
-        assertEquals(term, requestVote.term)
-        assertEquals(candidateId, requestVote.candidateId)
+        assertEquals(originalMessage.term, requestVote.term)
+        assertEquals(originalMessage.candidateId, requestVote.candidateId)
     }
 
     @Test
-    fun testDeserializeWiresharkCapture() {
-        // Wireshark captured hex data
-        val hexString = "000202313685c1912a141279f8248fc8db5899c5df5b"
+    fun testVoteResponseSerializeDeserialize() {
+        val originalMessage = RaftElectionMessage.VoteResponse(10, true)
+        val serialized = originalMessage.serialize()
 
-        // Convert hex string to byte array
-        val bytes = hexStringToByteArray(hexString)
+        // Simulate prepending the message ID for a full packet test
+        val buffer = java.nio.ByteBuffer.allocate(4 + serialized.size)
+        buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(RaftElectionMessage.VOTE_RESPONSE_ID)
+        buffer.put(serialized)
+        val fullPacket = buffer.array()
 
-        println("Original byte array length: ${bytes.size}")
+        val deserializedMessage = RaftElectionMessage.deserialize(fullPacket)
 
-        try {
-            // Use deserialization method
-            val message = RaftElectionMessage.deserialize(bytes)
+        assertTrue(deserializedMessage is RaftElectionMessage.VoteResponse)
+        val voteResponse = deserializedMessage as RaftElectionMessage.VoteResponse
+        assertEquals(10, voteResponse.term)
+        assertEquals(true, voteResponse.voteGranted)
+    }
 
-            // Print message type
-            println("Message type: ${message.javaClass.simpleName}")
+    @Test
+    fun testHeartbeatSerializeDeserialize() {
+        val originalMessage = RaftElectionMessage.Heartbeat(12, "leader-abc")
+        val serialized = originalMessage.serialize()
 
-            // Print detailed information based on message type
-            when (message) {
-                is RaftElectionMessage.RequestVote -> {
-                    println("Request Vote message:")
-                    println("- Term: ${message.term}")
-                    println("- Candidate ID: ${message.candidateId}")
-                }
-                is RaftElectionMessage.VoteResponse -> {
-                    println("Vote Response message:")
-                    println("- Term: ${message.term}")
-                    println("- Vote granted: ${message.voteGranted}")
-                }
-                is RaftElectionMessage.Heartbeat -> {
-                    println("Heartbeat message:")
-                    println("- Term: ${message.term}")
-                    println("- Leader ID: ${message.leaderId}")
-                }
-            }
+        // Simulate prepending the message ID
+        val buffer = java.nio.ByteBuffer.allocate(4 + serialized.size)
+        buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(RaftElectionMessage.HEARTBEAT_ID)
+        buffer.put(serialized)
+        val fullPacket = buffer.array()
 
-            // Verify results
-            assertTrue(message is RaftElectionMessage.RequestVote)
-            val requestVote = message as RaftElectionMessage.RequestVote
-//            assertEquals(42, requestVote.term)
-//            assertEquals("node123", requestVote.candidateId)
-        } catch (e: Exception) {
-            println("Parsing failed: ${e.message}")
-            e.printStackTrace()
-            throw e  // Rethrow exception to fail the test
+        val deserializedMessage = RaftElectionMessage.deserialize(fullPacket)
+
+        assertTrue(deserializedMessage is RaftElectionMessage.Heartbeat)
+        val heartbeat = deserializedMessage as RaftElectionMessage.Heartbeat
+        assertEquals(12, heartbeat.term)
+        assertEquals("leader-abc", heartbeat.leaderId)
+    }
+
+    @Test
+    fun `deserialize should throw exception for unknown message type`() {
+        val unknownTypeId = 999
+        val buffer = ByteBuffer.allocate(4)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(unknownTypeId)
+        val packet = buffer.array()
+
+        val exception = assertThrows<IllegalArgumentException> {
+            RaftElectionMessage.deserialize(packet)
+        }
+        assertEquals("RaftElectionMessage: Unknown type - $unknownTypeId", exception.message)
+    }
+
+    @Test
+    fun `deserialize should throw exception for truncated packet`() {
+        // A packet that is too short to contain a full message ID
+        val truncatedPacket = byteArrayOf(0x7D, 0x00) // 125 (REQUEST_VOTE_ID) is 7D 00 00 00 in little-endian
+
+        assertThrows<java.nio.BufferUnderflowException> {
+            RaftElectionMessage.deserialize(truncatedPacket)
         }
     }
 
-    // Helper method: convert hex string to byte array
-    private fun hexStringToByteArray(hexString: String): ByteArray {
-        val s = hexString.replace(" ", "").replace("\n", "")
-        val len = s.length
-        val data = ByteArray(len / 2)
-        var i = 0
-        while (i < len) {
-            data[i / 2] = ((Character.digit(s[i], 16) shl 4) +
-                            Character.digit(s[i + 1], 16)).toByte()
-            i += 2
-        }
-        return data
+    @Test
+    fun `RequestVote deserialize should handle empty candidateId`() {
+        val original = RaftElectionMessage.RequestVote(5, "")
+        val serialized = original.serialize()
+
+        // Prepend message ID for general deserialization
+        val buffer = ByteBuffer.allocate(4 + serialized.size).order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(RaftElectionMessage.REQUEST_VOTE_ID)
+        buffer.put(serialized)
+        val packet = buffer.array()
+
+        val deserialized = RaftElectionMessage.deserialize(packet) as RaftElectionMessage.RequestVote
+        assertEquals(5, deserialized.term)
+        assertEquals("", deserialized.candidateId)
     }
 }

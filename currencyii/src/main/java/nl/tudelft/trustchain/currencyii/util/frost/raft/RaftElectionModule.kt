@@ -14,7 +14,9 @@ import java.util.UUID
 
 class RaftElectionModule(
     private val community: RaftSendDelegate,
-    private val nodeId: String = UUID.randomUUID().toString()
+    private val nodeId: String = UUID.randomUUID().toString(),
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    private val random: Random = Random()
 ) {
     companion object {
         private const val TAG = "RaftElectionModule"
@@ -30,7 +32,6 @@ class RaftElectionModule(
     private var currentLeader: Peer? = null
 
     private var electionTimeOut: Job? = null
-    private var random = Random()
     private var minElectionTimeoutMs = 800L
     private var maxElectionTimeoutMs = 1500L
     private var heartbeatIntervalMs = 300L
@@ -66,7 +67,7 @@ class RaftElectionModule(
      */
     private fun restartElectionTimeout() {
         electionTimeOut?.cancel()
-        electionTimeOut = CoroutineScope(Dispatchers.IO).launch {
+        electionTimeOut = scope.launch {
             val timeout = minElectionTimeoutMs + Math.abs(random.nextLong()) % (maxElectionTimeoutMs - minElectionTimeoutMs)
             delay(timeout)
             startElection()
@@ -219,7 +220,7 @@ class RaftElectionModule(
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
 
-        heartbeatJob = CoroutineScope(Dispatchers.IO).launch {
+        heartbeatJob = scope.launch {
             while(isActive && currentState == NodeState.LEADER) {
                 sendHeartbeats()
                 delay(heartbeatIntervalMs)
