@@ -4,6 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -15,12 +17,15 @@ import java.util.UUID
 class RaftElectionModule(
     private val community: RaftSendDelegate,
     private val nodeId: String = UUID.randomUUID().toString(),
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val random: Random = Random()
 ) {
     companion object {
         private const val TAG = "RaftElectionModule"
     }
+
+    // Create a dedicated scope for this module that can be cancelled without affecting the externalScope.
+    private val moduleScope = CoroutineScope(externalScope.coroutineContext + SupervisorJob())
 
     enum class NodeState {
         FOLLOWER, CANDIDATE, LEADER
@@ -57,8 +62,10 @@ class RaftElectionModule(
     }
 
     fun stop() {
-        electionTimeOut?.cancel()
-        heartbeatJob?.cancel()
+        // Cancel the dedicated scope for this module.
+        // This will cancel all coroutines launched within it (electionTimeOut, heartbeatJob).
+        moduleScope.cancel()
+        Log.d(TAG, "Stopped Raft election module with node ID: ${getSelfNodeIdDisplay()}")
     }
 
     /**
@@ -67,7 +74,7 @@ class RaftElectionModule(
      */
     private fun restartElectionTimeout() {
         electionTimeOut?.cancel()
-        electionTimeOut = scope.launch {
+        electionTimeOut = moduleScope.launch {
             val timeout = minElectionTimeoutMs + Math.abs(random.nextLong()) % (maxElectionTimeoutMs - minElectionTimeoutMs)
             delay(timeout)
             startElection()
@@ -220,7 +227,7 @@ class RaftElectionModule(
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
 
-        heartbeatJob = scope.launch {
+        heartbeatJob = moduleScope.launch {
             while(isActive && currentState == NodeState.LEADER) {
                 sendHeartbeats()
                 delay(heartbeatIntervalMs)

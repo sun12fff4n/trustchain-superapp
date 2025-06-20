@@ -179,7 +179,7 @@ class RaftTestActivity : AppCompatActivity() {
     private fun updateDeviceInfo() {
         val myPeer = coinCommunity.myPeer
         textDeviceId.text = "Device ID: ${myPeer.mid}"
-        textNetworkAddress.text = "Address: ${myPeer.address}"
+        textNetworkAddress.text = "Address: ${myPeer.wanAddress}"
     }
 
     /**
