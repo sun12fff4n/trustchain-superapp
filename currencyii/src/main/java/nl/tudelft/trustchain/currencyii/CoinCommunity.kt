@@ -642,7 +642,8 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         private val RAFT_MEMBER_MIDS = setOf(
             "80d119411e2e6effeebc9f17683be536aed46915",
-            "94f937a09272c619d7e1b3435e6759585676319c",
+            "46d1d14be95a0aaff76284149319260819877f69",
+
         )
 
         private var raftInitialized = false
