@@ -27,14 +27,14 @@ private sealed class RaftEvent {
 class RaftElectionModule(
     private val community: RaftSendDelegate,
     private val nodeId: String = UUID.randomUUID().toString(),
-    externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    private val parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val random: Random = Random()
 ) {
     companion object {
         private const val TAG = "RaftElectionModule"
     }
 
-    private val moduleScope = CoroutineScope(externalScope.coroutineContext + SupervisorJob())
+    private lateinit var moduleScope: CoroutineScope
 
     // Step 2: Create a Channel to act as an event queue.
     private val eventChannel = Channel<RaftEvent>(Channel.UNLIMITED)
@@ -65,6 +65,13 @@ class RaftElectionModule(
     }
 
     fun start() {
+        // Prevent starting if already running
+        if (this::moduleScope.isInitialized && moduleScope.isActive) {
+            Log.w(TAG, "Module ${getSelfNodeIdDisplay()} is already running.")
+            return
+        }
+        // Create a new scope every time we start. This makes the module restartable.
+        moduleScope = CoroutineScope(parentScope.coroutineContext + SupervisorJob())
         Log.d(TAG, "Starting Raft election module with node ID: ${getSelfNodeIdDisplay()}")
         // Step 3: Launch the single event processing loop.
         runEventLoop()
@@ -72,8 +79,11 @@ class RaftElectionModule(
     }
 
     fun stop() {
-        moduleScope.cancel()
-        Log.d(TAG, "Stopped Raft election module with node ID: ${getSelfNodeIdDisplay()}")
+        // Check if the scope has been initialized and is active before cancelling.
+        if (this::moduleScope.isInitialized && moduleScope.isActive) {
+            moduleScope.cancel()
+            Log.d(TAG, "Stopped Raft election module with node ID: ${getSelfNodeIdDisplay()}")
+        }
     }
 
     // The core of the Actor model: a single coroutine that processes all events sequentially.

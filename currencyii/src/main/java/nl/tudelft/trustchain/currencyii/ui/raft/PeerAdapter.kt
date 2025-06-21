@@ -11,6 +11,7 @@ import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule.NodeS
 import java.text.SimpleDateFormat
 import java.util.*
 
+// Adapter for displaying peers in a RecyclerView
 class PeerAdapter(
     private val peers: MutableList<PeerItem> = mutableListOf()
 ) : RecyclerView.Adapter<PeerAdapter.ViewHolder>() {
