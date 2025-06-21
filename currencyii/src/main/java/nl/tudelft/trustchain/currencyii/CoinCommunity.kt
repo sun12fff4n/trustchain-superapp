@@ -26,6 +26,7 @@ import nl.tudelft.trustchain.currencyii.util.DAOTransferFundsHelper
 import nl.tudelft.trustchain.currencyii.util.frost.FrostCommitmentMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostJoinProposalToSA
 import nl.tudelft.trustchain.currencyii.util.frost.FrostKeyGenEngine
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
 import nl.tudelft.trustchain.currencyii.util.frost.FrostNoncesToSAMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostPayload
@@ -39,7 +40,6 @@ import java.util.Base64
 import org.ethereum.geth.BigInt
 import java.math.BigInteger
 import java.util.concurrent.ConcurrentHashMap
-import java.util.Base64
 import java.util.LinkedList
 import java.util.UUID
 
