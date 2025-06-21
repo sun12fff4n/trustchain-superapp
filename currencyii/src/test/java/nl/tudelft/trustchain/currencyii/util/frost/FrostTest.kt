@@ -19,16 +19,16 @@ class FrostTest {
     private val threshold = 3 // t-of-n threshold
     private val numParticipants = 5 // total participants
     private val sentMessages = mutableListOf<Triple<Peer, Peer, ByteArray>>() // sender, receiver, data
-    
+
     @BeforeEach
     fun setUp() {
         // Create test peers
-        peers = (0 until numParticipants).map { 
+        peers = (0 until numParticipants).map {
             val privateKey = JavaCryptoProvider.generateKey()
             Peer(privateKey)
         }
     }
-    
+
     /**
      * Test the full key generation process with all participants
      */
@@ -42,7 +42,6 @@ class FrostTest {
             val send: (Peer, ByteArray) -> Unit = send@{ sender, data ->
                 val frostMessage = FrostMessage.deserialize(data).first
                 val senderId = peerId(sender)
-
                 peers.forEach { peer ->
                     val receiverId = peerId(peer)
                     if (receiverId == senderId) return@forEach
@@ -65,17 +64,28 @@ class FrostTest {
                     }
                 }
             }
-            
+            val broadcast: (ByteArray) -> Unit = send@{ data ->
+                val frostMessage = FrostMessage.deserialize(data).first
+                peers.forEach { peer ->
+                    val receiverId = peerId(peer)
+                    val engine = engineMap[receiverId] ?: return@forEach
+                }
+            }
+
+
+            val sessionId = UUID.randomUUID().toString()
+            println(sessionId.length.toString())
             for (participant in peers) {
-                val sessionId = UUID.randomUUID().toString()
                 val participantId = peerId(participant)
                 engineMap[participantId] = FrostKeyGenEngine(threshold, participantId, peers, sessionId, send)
             }
 
             val results = engineMap.map { (_, engine) ->
-                async { engine.generate() }
+                async {
+                    engine.generate()
+                }
             }.awaitAll()
-        
+
             // Verify results
             for ((index, result) in results.withIndex()) {
                 assertTrue(result.success, "Key generation should succeed for participant $index")
@@ -85,7 +95,7 @@ class FrostTest {
                 assertEquals(numParticipants, result.participants.size, "Participant count should match for participant $index")
                 assertEquals(threshold, result.threshold, "Threshold should match for participant $index")
             }
-        
+
             // Verify all participants generated the same group public key
             val firstGroupKey = results.first().groupPublicKey
             for ((index, result) in results.drop(1).withIndex()) {
@@ -93,4 +103,4 @@ class FrostTest {
             }
         }
     }
-} 
+}

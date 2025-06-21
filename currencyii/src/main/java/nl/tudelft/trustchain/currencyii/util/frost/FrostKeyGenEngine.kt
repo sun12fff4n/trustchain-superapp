@@ -6,7 +6,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.Community
+import nl.tudelft.ipv8.messaging.Serializable
 import nl.tudelft.ipv8.util.toHex
+import java.io.Serial
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.collections.HashMap
@@ -15,41 +17,46 @@ import java.math.BigInteger
 import java.security.MessageDigest
 
 class FrostKeyGenEngine(
-    private val threshold: Int,
-    private val participantId: String,
-    private val participants: List<Peer>,
-    private val sessionId: String,
-    private val send: (Peer, ByteArray) -> Unit
+    var threshold: Int,
+    var participantId: String,
+    var participants: List<Peer>,
+    var sessionId: String,
+    val send: (Peer, Serializable) -> Unit,
+    val broadcast: (Serializable) -> Unit,
 ) {
     // Round 1 variables (only for this participant)
-    private lateinit var a: List<BigInteger> // Polynomial coefficients a_j for this participant
-    private var commitment: List<BigInteger>? = null // Public commitment for this participant
-    private var proof: Pair<BigInteger, BigInteger>? = null // Zero-knowledge proof (R, z) for this participant
+    lateinit var a: List<BigInteger> // Polynomial coefficients a_j for this participant
+    var commitment: List<BigInteger>? = null // Public commitment for this participant
+    var proof: Pair<BigInteger, BigInteger>? = null // Zero-knowledge proof (R, z) for this participant
 
     // Round 2 variables (only for this participant)
-    private lateinit var shares: MutableMap<String, BigInteger> // Shares this participant sends to others (or receives)
-    private var signingShare: BigInteger? = null // This participant's signing share s_i
-    private var verificationShare: BigInteger? = null // This participant's public verification share Y_i
-    private var groupPublicKey: BigInteger? = null // Group public key Y (can be computed by all)
+    lateinit var shares: MutableMap<String, BigInteger> // Shares this participant sends to others (or receives)
+    var signingShare: BigInteger? = null // This participant's signing share s_i
+    var verificationShare: BigInteger? = null // This participant's public verification share Y_i
+    var groupPublicKey: BigInteger? = null // Group public key Y (can be computed by all)
 
     // Received commitments and verification shares from other participants
-    private val commitments = ConcurrentHashMap<String, List<BigInteger>>()
-    private val proofs = ConcurrentHashMap<String, Pair<BigInteger, BigInteger>>()
-    private val verificationShares = ConcurrentHashMap<String, BigInteger>()
+    public val commitments = ConcurrentHashMap<String, List<BigInteger>>()
+    public val proofs = ConcurrentHashMap<String, Pair<BigInteger, BigInteger>>()
+    public val verificationShares = ConcurrentHashMap<String, BigInteger>()
 
     // Locks for synchronization
-    private val commitmentsMutex = Mutex()
-    private val verificationSharesMutex = Mutex()
+    public val commitmentsMutex = Mutex()
+    public val verificationSharesMutex = Mutex()
 
     // Peer ID mapping
-    private val peerIdMapping = HashMap<String, Peer>()
+    public val peerIdMapping = HashMap<String, Peer>()
 
     // Secure random for better security
-    private val secureRandom = SecureRandom()
-    private val RESPONSE_TIMEOUT = FrostConstants.DEFAULT_TIMEOUT
+    public val secureRandom = SecureRandom()
+    public val RESPONSE_TIMEOUT = FrostConstants.DEFAULT_TIMEOUT
 
 
     init {
+        initialize()
+    }
+
+    fun initialize() {
         // Initialize peer ID mapping
         for (peer in participants) {
             val peerId = Base64.getEncoder().encodeToString(peer.publicKey.keyToBin())
@@ -61,6 +68,7 @@ class FrostKeyGenEngine(
         try {
             round1()
 
+            Log.i("Frost", "Waiting for commitments...")
             println("Waiting for commitments...")
             if (!waitForCommitments()) {
                 return KeyGenResult(
@@ -69,6 +77,7 @@ class FrostKeyGenEngine(
                 )
             }
 
+            Log.i("Frost", "Commitments received. Verifying...")
             println("Commitments received. Verifying...")
             if (!verifyAllCommitments()) {
                 return KeyGenResult(
@@ -77,9 +86,12 @@ class FrostKeyGenEngine(
                 )
             }
 
+            Log.i("Frost", "round2() starting")
             println("round2() starting")
             round2()
 
+
+            Log.i("Frost", "Waiting for verification shares...")
             println("Waiting for verification shares...")
             if (!waitForVerificationShares()) {
                 return KeyGenResult(
@@ -92,6 +104,10 @@ class FrostKeyGenEngine(
             computeGroupPublicKey()
 
             println("Key generation succeeded")
+            Log.i("Frost", "generated group key is $groupPublicKey")
+            Log.i("DKGSummary", "siginingShare: $signingShare, verificationShare: $verificationShare")
+            Log.i("DKGSummary", "groupPublicKey: $groupPublicKey")
+            Log.i("DKGSummary", "others' verficiationShares: $verificationShares")
             return KeyGenResult(
                 success = true,
                 signingShare = signingShare,
@@ -116,6 +132,7 @@ class FrostKeyGenEngine(
 
         // Round 1.2: Compute a commitment (C) as [g^a_0, g^a_1, ..., g^a_{t-1}] (mod q)
         commitment = a.map { coeff -> FrostConstants.g.modPow(coeff, FrostConstants.p) }
+        Log.i("Frost", "peerId: ${participantId} --- commitment: ${commitment}")
         println("peerId: ${participantId} --- commitment: ${commitment}")
 
         // Round 1.3: Compute a zero-knowledge proof (R, z)
@@ -129,14 +146,15 @@ class FrostKeyGenEngine(
 
         // Round 1.4: Broadcast commitment and proof to all participants
         val commitmentMessage = FrostCommitmentMessage(sessionId, commitment!!, proof!!)
-        val message = commitmentMessage.toFrostMessage()
+        val message = commitmentMessage.toFrostPayload()
 
         val self = peerIdMapping[participantId]
-        send(self!!, message.serialize())
-
+        broadcast(message)
         // Also store our own commitment
-        commitments[participantId] = commitment!!
-        proofs[participantId] = proof!!
+        // UPDATE: DO NOT STORE OUR OWN COMMITMENT HERE, INSTEAD, ADD TO commitmentsWHEN PROCESSING COMMITMENT MESSAGE
+//        commitments[participantId] = commitment!!
+//        proofs[participantId] = proof!!
+
     }
 
     // Round 2: Share distribution, verification, signing share and public key share calculation
@@ -154,11 +172,14 @@ class FrostKeyGenEngine(
 
         // Round 2.2: Broadcast verification share to all participants
         val verificationShareMessage = FrostVerificationShareMessage(sessionId, verificationShare!!)
-        val message = verificationShareMessage.toFrostMessage()
-
+        val message = verificationShareMessage.toFrostPayload()
         val self = peerIdMapping[participantId]
-        send(self!!, message.serialize())
-
+        if (self == null) {
+            Log.e("Frost", "self is null for participantId: $participantId")
+            throw IllegalStateException("self is null for participantId: $participantId")
+        }
+        Log.i("Frost", message.serialize().size.toString())
+        broadcast(message)
         // Also store our own verification share
         verificationShares[participantId] = verificationShare!!
     }

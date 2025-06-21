@@ -1,0 +1,73 @@
+<!-- res/layout/item_peer_status.xml -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="horizontal"
+    android:background="?attr/selectableItemBackground"
+    android:paddingVertical="6dp">
+
+    <!-- the external ip address -->
+    <TextView
+        android:id="@+id/ipAddress"
+        style="@style/TextAppearance.MaterialComponents.Body2"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        app:fontFamily="monospace"
+        tools:text="192.168.1.1"/>
+
+    <!-- last response time -->
+    <TextView
+        android:id="@+id/lastResponse"
+        style="@style/TextAppearance.MaterialComponents.Body2"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.5"
+        android:gravity="center"
+        tools:text="30s ago"/>
+
+    <!-- public Key -->
+    <TextView
+        android:id="@+id/publicKey"
+        style="@style/TextAppearance.MaterialComponents.Body2"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.5"
+        android:gravity="center"
+        tools:text="sfasfwfqqweee"/>
+
+    <!-- timeout alert -->
+    <ImageView
+        android:id="@+id/timeoutAlert"
+        android:layout_width="0dp"
+        android:layout_height="24dp"
+        android:layout_weight="1"
+        android:paddingEnd="8dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_alert"
+        app:tint="@color/red_500"/>
+
+    <!--    <TextView-->
+<!--        android:id="@+id/timeoutCount"-->
+<!--        style="@style/TextAppearance.MaterialComponents.Body2"-->
+<!--        android:layout_width="0dp"-->
+<!--        android:layout_height="match_parent"-->
+<!--        android:layout_weight="1"-->
+<!--        android:gravity="center"-->
+<!--        tools:text="2"/>-->
+
+<!--    &lt;!&ndash; alert for incoming packets &ndash;&gt;-->
+<!--    <ImageView-->
+<!--        android:id="@+id/alertIndicator"-->
+<!--        android:layout_width="0dp"-->
+<!--        android:layout_height="24dp"-->
+<!--        android:layout_weight="1"-->
+<!--        android:paddingEnd="8dp"-->
+<!--        android:scaleType="centerInside"-->
+<!--        android:src="@drawable/ic_alert"-->
+<!--        app:tint="@color/red_500"/>-->
+</LinearLayout>

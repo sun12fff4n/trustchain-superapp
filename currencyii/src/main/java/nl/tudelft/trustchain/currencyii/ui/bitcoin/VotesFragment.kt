@@ -2,6 +2,7 @@ package nl.tudelft.trustchain.currencyii.ui.bitcoin
 
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Base64
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -15,6 +16,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
+import com.google.gson.Gson
 import kotlinx.coroutines.*
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
 import nl.tudelft.ipv8.util.toHex
@@ -22,9 +24,14 @@ import nl.tudelft.trustchain.common.R
 import nl.tudelft.trustchain.common.databinding.FragmentVotesBinding
 import nl.tudelft.trustchain.common.ui.TabsAdapter
 import nl.tudelft.trustchain.currencyii.CoinCommunity
+import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.FROST_BROADCASTING_BLOCK
 import nl.tudelft.trustchain.currencyii.coin.WalletManagerAndroid
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.ui.BaseFragment
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
+import nl.tudelft.trustchain.currencyii.util.frost.FrostNonceToParticipantMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostPayload
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSiginingEngine
 import org.bitcoinj.core.*
 
 /**
@@ -89,6 +96,12 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
             // Check which type the block is and set the corresponding data
             if (type == CoinCommunity.SIGNATURE_ASK_BLOCK) {
                 signatureAskBlockVotes(blockId)
+            } else if (type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK){
+                updateVotersList(arrayListOf(), arrayListOf(), arrayListOf())
+                updateTabsAdapter(0);
+                updateTabsAdapter(1);
+                updateTabsAdapter(2);
+                frostSignatureAskBlockVotes(blockId)
             } else if (type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK) {
                 transferFundsAskBlockVotes(blockId)
             }
@@ -127,7 +140,8 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
                     .getChainByUser(peer.publicKey.keyToBin())
                     .filter {
                         it.type == CoinCommunity.SIGNATURE_ASK_BLOCK ||
-                            it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK
+                            it.type == CoinCommunity.TRANSFER_FUNDS_ASK_BLOCK ||
+                                it.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK
                     }
             allBlocks = allBlocks + crawlResult
         }
@@ -253,6 +267,131 @@ class VotesFragment : BaseFragment(R.layout.fragment_votes) {
                 }
                 delay(1000)
             }
+        }
+    }
+
+    private val processedJoiners = HashSet<String>();
+
+    private fun fetchFrostSASendNonceToParticipantBlock(
+        walletId: String,
+    ): List<FrostBradcastingBlockTD> {
+        return getTrustChainCommunity().database.getBlocksWithType(FROST_BROADCASTING_BLOCK)
+            .map {
+                FrostBroadcastingTransactionData(it.transaction).getData()
+            }
+    }
+
+    /**
+     * The method for setting the data for frost join requests
+     */
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun frostSignatureAskBlockVotes(blockId: String) {
+        updateVotersList(arrayListOf(), arrayListOf(), arrayListOf())
+        updateTabsAdapter(0);
+        updateTabsAdapter(1);
+        updateTabsAdapter(2);
+
+        val walletManager = WalletManagerAndroid.getInstance()
+        val myPublicBitcoinKey = walletManager.protocolECKey().publicKeyAsHex
+        val myPublicKey = getTrustChainCommunity().myPeer.publicKey.keyToBin()
+        val block = getSelectedBlock(blockId) ?: return
+
+        val rawData = SWSignatureAskTransactionData(block.transaction)
+        val data = rawData.getData()
+
+        val walletId = data.SW_UNIQUE_ID
+
+        // Get information about the shared wallet
+        val sw =
+            getCoinCommunity().discoverSharedWallets()
+                .filter { b -> SWJoinBlockTransactionData(b.transaction).getData().SW_UNIQUE_ID == walletId }[0]
+        val swData = SWJoinBlockTransactionData(sw.transaction).getData()
+
+        // Get the id of the person that wants to join
+        val requestToJoinId = sw.publicKey.toHex()
+
+
+        title.text = data.SW_UNIQUE_PROPOSAL_ID
+        subTitle.text = getString(R.string.vote_join_request_message, requestToJoinId, walletId)
+
+        // Vote functionality
+        voteFab.setOnClickListener { v ->
+            val builder = AlertDialog.Builder(v.context)
+            builder.setTitle(R.string.vote_join_request_title)
+            builder.setMessage(
+                getString(
+                    R.string.vote_join_request_message,
+                    requestToJoinId,
+                    walletId
+                )
+            )
+            builder.setPositiveButton("YES") { _, _ ->
+                // Update the voter's list, because I voted yes
+                // Update the GUI
+
+                Toast.makeText(
+                    v.context,
+                    getString(R.string.vote_join_request_upvoted, requestToJoinId, walletId),
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                // Send yes vote
+                // if send yes, periodically check if the leader has sent the nonce pair to me, if yes, then verify it.
+                CoroutineScope(Dispatchers.Default).launch {
+                    while (true) {
+                        Thread.sleep(2000)
+                        val msgs = fetchFrostSASendNonceToParticipantBlock(walletId)
+                        val sizeInitial = processedJoiners.size
+                        for (msg in msgs) {
+                            val frostPayload = FrostPayload.deserialize(msg.SW_FROST_DATA, 0).first
+                            if (frostPayload.messageType != FrostMessageType.FROST_NONCEPAIR_TO_PARTICIPANT) {
+                                continue
+                            }
+                            val frostSAToParticipantMsg = FrostNonceToParticipantMessage.deserialize(frostPayload.data)
+                            Log.i("Frost", "${frostSAToParticipantMsg.joinerId} want to join ${walletId}, this wallet id is ${frostSAToParticipantMsg.walletId}")
+                            if (frostSAToParticipantMsg.walletId != walletId) {
+                                continue
+                            }
+                            if (processedJoiners.contains(frostSAToParticipantMsg.joinerId)) {
+                                continue
+                            }
+                            processedJoiners.add(frostSAToParticipantMsg.joinerId)
+
+                            Log.i("Frost", "I am ${java.util.Base64.getEncoder().encodeToString(myPublicKey)}")
+                            for ((peerId, noncePair) in frostSAToParticipantMsg.noncePairs) {
+                                Log.i("Frost", "Leader send ${noncePair.first} and ${noncePair.second} to ${peerId}")
+                            }
+
+                            val m = "VOTE_YES".toByteArray()
+                            val B = frostSAToParticipantMsg.noncePairs
+                            val si = getCoinCommunity().currentFrostKeyGenEngine!!.signingShare
+                            val Y = getCoinCommunity().currentFrostKeyGenEngine!!.verificationShares
+
+                            getCoinCommunity().frostSigningEngine!!.onReceivedNonceFromSA(m, B, si!!, Y)
+
+                            break
+                        }
+                        if (processedJoiners.size > sizeInitial) {
+                            break
+                        }
+                    }
+                }
+                getCoinCommunity().joinAskBlockReceived(block, myPublicKey, true, requireContext())
+                Log.i("Coin", "Voted yes on frost joining of: ${block.transaction}")
+            }
+
+            builder.setNeutralButton("NO") { _, _ ->
+                Toast.makeText(
+                    v.context,
+                    getString(R.string.vote_join_request_downvoted, requestToJoinId, walletId),
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                // Send no vote
+//                getCoinCommunity().joinAskBlockReceived(block, myPublicKey, false, requireContext())
+                Log.i("Coin", "Voted no on frost joining of: ${block.transaction}")
+            }
+            builder.show()
         }
     }
 

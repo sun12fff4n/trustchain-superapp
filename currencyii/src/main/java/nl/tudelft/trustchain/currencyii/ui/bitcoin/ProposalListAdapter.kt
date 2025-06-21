@@ -9,12 +9,14 @@ import nl.tudelft.trustchain.currencyii.CoinCommunity
 import nl.tudelft.trustchain.currencyii.R
 import nl.tudelft.trustchain.currencyii.coin.WalletManagerAndroid
 import nl.tudelft.trustchain.currencyii.databinding.ProposalRowDataBinding
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWSignatureAskTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWTransferFundsAskTransactionData
 import nl.tudelft.trustchain.currencyii.ui.BaseFragment
 import nl.tudelft.trustchain.currencyii.util.taproot.CTransaction
 import org.bitcoinj.core.Coin
 import java.text.SimpleDateFormat
+import kotlin.math.sign
 
 class ProposalListAdapter(
     private val context: BaseFragment,
@@ -137,6 +139,27 @@ class ProposalListAdapter(
             daoId.text = data.SW_UNIQUE_ID
             proposalId.text = data.SW_UNIQUE_PROPOSAL_ID
             signaturesRequired.text = "${favorVotes.size}/${data.SW_SIGNATURES_REQUIRED}"
+            // Hide the components only used for transfer funds
+            hideTransferProposalComponents(view)
+        } else if (block.type == CoinCommunity.FROST_SIGNATURE_ASK_BLOCK) {
+            val data = FrostSWSignatureAskTransactionData(block.transaction).getData()
+            // Get frostResponse
+            val frostResponse =
+                    context.getCoinCommunity()
+                        .fetchProposalFrostResponse(data.SW_UNIQUE_ID, data.SW_UNIQUE_PROPOSAL_ID)
+
+            // Check if I voted
+            val myPublicBitcoinKey = walletManager.protocolECKey().publicKeyAsHex
+
+            about.text = "Frost Join request"
+            createdAt.text = formatter.format(block.timestamp)
+            daoId.text = data.SW_UNIQUE_ID
+            proposalId.text = data.SW_UNIQUE_PROPOSAL_ID
+            if (frostResponse == null) {
+                signaturesRequired.text = "frost signature not created yet"
+            } else {
+                signaturesRequired.text = "frost signature created!"
+            }
             // Hide the components only used for transfer funds
             hideTransferProposalComponents(view)
         }

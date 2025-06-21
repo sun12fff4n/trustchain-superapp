@@ -13,13 +13,22 @@ import kotlinx.coroutines.withContext
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
 import nl.tudelft.ipv8.util.toHex
 import nl.tudelft.trustchain.currencyii.CoinCommunity
+import nl.tudelft.trustchain.currencyii.CoinCommunity.Companion.FROST_BROADCASTING_BLOCK
 import nl.tudelft.trustchain.currencyii.R
 import nl.tudelft.trustchain.currencyii.coin.WalletManagerAndroid
 import nl.tudelft.trustchain.currencyii.databinding.FragmentJoinNetworkBinding
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostBroadcastingTransactionData
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWResponseSignatureBlockTD
+import nl.tudelft.trustchain.currencyii.sharedWallet.FrostSWSignatureAskBlockTD
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWJoinBlockTransactionData
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWResponseSignatureBlockTD
 import nl.tudelft.trustchain.currencyii.sharedWallet.SWSignatureAskBlockTD
 import nl.tudelft.trustchain.currencyii.ui.BaseFragment
+import nl.tudelft.trustchain.currencyii.util.frost.FrostMessageType
+import nl.tudelft.trustchain.currencyii.util.frost.FrostPayload
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToJoinerMessage
+import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToSAMessage
+import java.math.BigInteger
 
 /**
  * A simple [Fragment] subclass.
@@ -151,7 +160,7 @@ class JoinDAOFragment : BaseFragment(R.layout.fragment_join_network) {
                     this@JoinDAOFragment,
                     uniqueWallets,
                     publicKey,
-                    "Click to join",
+                    "Click to join via Frost",
                     disableOnUserJoined = true
                 )
 
@@ -160,7 +169,7 @@ class JoinDAOFragment : BaseFragment(R.layout.fragment_join_network) {
                 lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
                         Log.i("Coin", "Clicked: $view, $position, $id")
-                        joinSharedWalletClicked(uniqueWallets[position])
+                        joinSharedWalletFrostClicked(uniqueWallets[position])
                     }
                 }
             }
@@ -248,6 +257,83 @@ class JoinDAOFragment : BaseFragment(R.layout.fragment_join_network) {
     }
 
     /**
+     * Join a shared bitcoin wallet via Frost.
+     */
+    private fun joinSharedWalletFrostClicked(block: TrustChainBlock) {
+        val mostRecentSWBlock =
+            getCoinCommunity().fetchLatestSharedWalletBlock(block.calculateHash())
+                ?: block
+
+        // Add a proposal to trust chain to join a shared wallet
+        val proposeBlockData =
+            try {
+                getCoinCommunity().proposeJoinWalletFrost(
+                    mostRecentSWBlock
+                ).getData()
+            } catch (t: Throwable) {
+                Log.e(
+                    "Coin",
+                    "Join wallet proposal failed. ${t.message ?: "No further information"}."
+                )
+                setAlertText(t.message ?: "Unexpected error occurred. Try again")
+                return
+            }
+
+        val context = requireContext()
+        // Wait for Frost signature
+        var frostSignature: BigInteger? = null
+        while (frostSignature == null) {
+            Thread.sleep(1000)
+            frostSignature = BigInteger.ZERO
+            val blockTDs = getTrustChainCommunity().database.getBlocksWithType(
+                FROST_BROADCASTING_BLOCK
+            )
+                .filter {
+                    val blockData = FrostBroadcastingTransactionData(it.transaction)
+                    blockData.getData().SW_UNIQUE_ID == proposeBlockData.SW_UNIQUE_ID
+                }
+                .map {
+                    FrostBroadcastingTransactionData(it.transaction).getData()
+                }
+            for (msg in blockTDs) {
+                val frostPayload = FrostPayload.deserialize(msg.SW_FROST_DATA, 0).first
+                if (frostPayload.messageType != FrostMessageType.FROST_SIGINING_TO_JOINER) {
+                    continue
+                }
+                val frostSignatureMessage = FrostSigningResponseToJoinerMessage.deserialize(frostPayload.data)
+                Log.i("Frost", "Fetched frost signature ${frostSignatureMessage.aggregateSignature} for ${frostSignatureMessage.joinerId}")
+                if (frostSignatureMessage.joinerId != java.util.Base64.getEncoder().encodeToString(getTrustChainCommunity().myPeer.publicKey.keyToBin())) {
+                    continue
+                }
+                frostSignature = frostSignatureMessage.aggregateSignature
+                break
+            }
+        }
+
+        // Create a new shared wallet using the frost signature
+        // Broadcast the new shared bitcoin wallet on trust chain.
+        try {
+            getCoinCommunity().joinBitcoinWalletFrost(
+                mostRecentSWBlock.transaction,
+                proposeBlockData,
+                frostSignature,
+                context
+            )
+            // Add new nonceKey after joining a DAO
+            WalletManagerAndroid.getInstance()
+                .addNewNonceKey(proposeBlockData.SW_UNIQUE_ID, context)
+        } catch (t: Throwable) {
+            Log.e("Coin", "Joining failed. ${t.message ?: "No further information"}.")
+            setAlertText(t.message ?: "Unexpected error occurred. Try again")
+        }
+
+        // Update wallets UI list
+        fetchSharedWalletsAndUpdateUI()
+        setAlertText("You joined ${proposeBlockData.SW_UNIQUE_ID}!")
+    }
+
+
+    /**
      * Collect the signatures of a join proposal
      */
     private fun collectJoinWalletResponses(blockData: SWSignatureAskBlockTD): List<SWResponseSignatureBlockTD>? {
@@ -269,6 +355,25 @@ class JoinDAOFragment : BaseFragment(R.layout.fragment_join_network) {
             return responses
         }
         return null
+    }
+
+    /**
+     * check if exists the frost signature of a join proposal
+     */
+    private fun getFrostJoinWalletResponseIfExists(blockData: FrostSWSignatureAskBlockTD): FrostSWResponseSignatureBlockTD? {
+
+        val response =
+            getCoinCommunity().fetchProposalFrostResponse(
+                blockData.SW_UNIQUE_ID,
+                blockData.SW_UNIQUE_PROPOSAL_ID
+            )
+        if (response != null) {
+            Log.i(
+                "Frost",
+                "fetched frost signature ${"hello"}"
+            )
+        }
+        return response
     }
 
     private fun setAlertText(text: String) {
