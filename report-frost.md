@@ -235,7 +235,7 @@ fun verifyCommitment(commitment: List<BigInteger>, proof: Pair<BigInteger, BigIn
 ```
 
 
-### 10. Conclusion
+### 8. Conclusion
 
 This implementation offers a  FROST threshold signature system, with:
 
