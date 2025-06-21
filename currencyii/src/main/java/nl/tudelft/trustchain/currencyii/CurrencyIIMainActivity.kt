@@ -3,6 +3,10 @@ package nl.tudelft.trustchain.currencyii
 import android.util.Log
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
+import android.content.Intent
+import android.os.Bundle
+import android.view.MenuItem
+import nl.tudelft.trustchain.currencyii.ui.raft.RaftTestActivity
 import nl.tudelft.trustchain.common.BaseActivity
 
 class CurrencyIIMainActivity : BaseActivity() {
@@ -24,6 +28,17 @@ class CurrencyIIMainActivity : BaseActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            R.id.raftTestFragment -> {
+                startActivity(Intent(this, RaftTestActivity::class.java))
+                return true
+            }
+        }
+        return super.onOptionsItemSelected(item)
     }
 
     fun addTopLevelDestinationId(id: Int) {

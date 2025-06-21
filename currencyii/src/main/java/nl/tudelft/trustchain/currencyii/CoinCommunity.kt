@@ -1,5 +1,6 @@
 package nl.tudelft.trustchain.currencyii
 
+//import nl.tudelft.trustchain.currencyii.util.frost.FrostSignatureMessage
 import android.app.Activity
 import android.content.Context
 import android.util.Log
@@ -7,14 +8,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import nl.tudelft.ipv8.Community
+import nl.tudelft.ipv8.IPv4Address
+import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.android.IPv8Android
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainBlock
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainCommunity
 import nl.tudelft.ipv8.attestation.trustchain.TrustChainTransaction
+import nl.tudelft.ipv8.messaging.Packet
+import nl.tudelft.ipv8.messaging.Serializable
 import nl.tudelft.ipv8.util.hexToBytes
 import nl.tudelft.ipv8.util.toHex
-import nl.tudelft.ipv8.Peer
-import nl.tudelft.ipv8.messaging.Serializable
 import nl.tudelft.trustchain.currencyii.sharedWallet.*
 import nl.tudelft.trustchain.currencyii.util.DAOCreateHelper
 import nl.tudelft.trustchain.currencyii.util.DAOJoinHelper
@@ -29,21 +32,28 @@ import nl.tudelft.trustchain.currencyii.util.frost.FrostPreProcessingEngine
 import nl.tudelft.trustchain.currencyii.util.frost.FrostSiginingEngine
 import nl.tudelft.trustchain.currencyii.util.frost.FrostSigningResponseToSAMessage
 import nl.tudelft.trustchain.currencyii.util.frost.FrostVerificationShareMessage
-import org.ethereum.geth.BigInt
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionMessage
+import nl.tudelft.trustchain.currencyii.util.frost.raft.RaftElectionModule
 import java.math.BigInteger
-import java.util.concurrent.ConcurrentHashMap
 import java.util.Base64
 import java.util.LinkedList
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 interface FrostSendDelegate {
     fun frostSend(peer: Peer, data: ByteArray): Unit
 }
 
+interface RaftSendDelegate {
+    fun raftSend(peer: Peer, messageId: Int, payload: nl.tudelft.ipv8.messaging.Serializable)
+    val myPeer: Peer
+}
+
 @Suppress("UNCHECKED_CAST")
-class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community(), FrostSendDelegate {
+class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc8db5899c5df5b") : Community(), FrostSendDelegate, RaftSendDelegate {
     override val serviceId = serviceId
 
+    override lateinit var myPeer: Peer
     // Map to store active FROST key generation engines by session ID
     // wallet Id -> SessionId -> FrostKeyGenEngine
     private val activeKeyGenEngines = ConcurrentHashMap<String, ConcurrentHashMap<String, FrostKeyGenEngine>>()
@@ -58,6 +68,19 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // send function for frost
     override fun frostSend(peer: Peer, data: ByteArray): Unit {
         return send(peer, data)
+    }
+
+    // send function for raft
+    override fun raftSend(peer: Peer, messageId: Int, payload: nl.tudelft.ipv8.messaging.Serializable) {
+        val packet = serializePacket(messageId, payload)
+        send(peer, packet)
+    }
+
+    // receive callback for frost
+    init {
+        messageHandlers[RaftElectionMessage.REQUEST_VOTE_ID] = ::onRequestVote
+        messageHandlers[RaftElectionMessage.VOTE_RESPONSE_ID] = ::onVoteResponse
+        messageHandlers[RaftElectionMessage.HEARTBEAT_ID] = ::onHeartbeat
     }
 
     // Register a new FROST key generation engine
@@ -174,6 +197,123 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     }
 
     var frostSigningEngine :FrostSiginingEngine? = null;
+
+    /**
+     *
+     * Raft Election
+     *
+     */
+    // Lazy Allocation
+    private var frostCoordinatorCallback: ((isLeader: Boolean, newLeader: Peer?) -> Unit)? = null
+
+    private var _raftElectionModule: RaftElectionModule? = null
+
+    val raftElectionModule: RaftElectionModule
+        get() {
+            if (_raftElectionModule == null) {
+                // Note: Lazy initialization without peers might not be ideal
+                // depending on the exact startup flow.
+                // Consider initializing only when peers are known.
+                initializeRaftElection(emptyList())
+            }
+            return _raftElectionModule!!
+        }
+
+    fun isRaftInitialized(): Boolean = _raftElectionModule != null
+
+    fun initializeRaftElection(clusterPeers: Collection<Peer>) {
+        if (_raftElectionModule == null) {
+            _raftElectionModule = RaftElectionModule(this)
+
+            // Add all peers to the module
+            clusterPeers.forEach { peer ->
+                _raftElectionModule?.addPeer(peer)
+            }
+
+            // Set up leader change callback
+            _raftElectionModule?.onLeaderChanged { newLeader ->
+                Log.d(TAG, "Leader changed to: ${newLeader?.mid ?: "None"}")
+                frostCoordinatorCallback?.invoke(isRaftInitialized() &&
+                    _raftElectionModule?.isLeader() == true, newLeader)
+            }
+
+            _raftElectionModule?.start()
+            Log.d(TAG, "RaftElectionModule initialized with ${clusterPeers.size} peers.")
+        }
+    }
+
+    fun onFrostCoordinatorChanged(callback: (isLeader: Boolean, newLeader: Peer?) -> Unit) {
+        frostCoordinatorCallback = callback
+    }
+
+    fun addRaftPeer(peer: Peer) {
+        if (isRaftInitialized()) {
+            raftElectionModule.addPeer(peer)
+        }
+    }
+
+    fun removeRaftPeer(peer: Peer) {
+        if (isRaftInitialized()) {
+            raftElectionModule.removePeer(peer)
+        }
+    }
+
+    fun isFrostCoordinator(): Boolean {
+        return isRaftInitialized() && raftElectionModule.isLeader()
+    }
+
+    fun getFrostCoordinator(): Peer? {
+        return if (isRaftInitialized()) {
+            raftElectionModule.getCurrentLeader()
+        } else null
+    }
+
+    // handle RequestVote
+    private fun onRequestVote(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
+        Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}. Delegating to Raft module.")
+
+        // Simply delegate the entire handling to the Raft module
+        raftElectionModule.handleRequestVote(peer, message)
+    }
+
+    // Handle VoteResponse
+    private fun onVoteResponse(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.VoteResponse)
+        Log.d("RaftMsg", "Received VoteResponse from ${peer.mid}, term=${message.term}, granted=${message.voteGranted}. Delegating to Raft module.")
+
+        // Handle vote response
+        raftElectionModule.handleVoteResponse(peer, message.term, message.voteGranted)
+    }
+
+    // Handle Heartbeat
+    private fun onHeartbeat(packet: Packet) {
+        val (peer, message) = packet.getAuthPayload(RaftElectionMessage.Heartbeat)
+        Log.d("RaftMsg", "Received Heartbeat from ${peer.mid}, term=${message.term}, leaderId=${message.leaderId}. Delegating to Raft module.")
+
+        // Handle heartbeat message
+        raftElectionModule.handleHeartbeat(peer, message.term, message.leaderId)
+    }
+
+    fun logRaftStatus() {
+        if (!isRaftInitialized()) {
+            Log.d("RaftDebug", "Raft not initialized")
+            return
+        }
+
+        val peers = try {
+            val peersField = raftElectionModule.javaClass.getDeclaredField("peers")
+            peersField.isAccessible = true
+            peersField.get(raftElectionModule) as Set<*>
+        } catch (e: Exception) {
+            emptySet<Any>()
+        }
+
+        Log.d("RaftDebug", "Raft has ${peers.size} registered peers")
+        peers.forEach { peer ->
+            Log.d("RaftDebug", "Raft peer: $peer")
+        }
+    }
 
     /**
      * Create a bitcoin genesis wallet and broadcast the result on trust chain.
@@ -795,5 +935,82 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
 
         // Block type for responding with a negative vote to a signature request with a signature
         const val SIGNATURE_AGREEMENT_NEGATIVE_BLOCK = "v1DAO_SIGNATURE_AGREEMENT_NEGATIVE"
+
+        // FROST signature message types
+        const val FROST_REQUEST_SIGNATURE = "v1FROST_REQUEST_SIGNATURE"
+        const val FROST_SIGNATURE_RESULT = "v1FROST_SIGNATURE_RESULT"
+        const val FROST_SIGNATURE_ERROR = "v1FROST_SIGNATURE_ERROR"
+
+        private const val TAG = "CoinCommunity"
+
+        private val RAFT_MEMBER_MIDS = setOf(
+            "80d119411e2e6effeebc9f17683be536aed46915",
+            "46d1d14be95a0aaff76284149319260819877f69",
+
+        )
+
+        private var raftInitialized = false
+
+
+    }
+
+    override fun walkTo(address: IPv4Address) {
+//        Log.d(TAG, "Walking to address: ${address.ip}:${address.port}")
+//
+//        // Same IP?
+//        if (address.ip == "80.112.133.253") {
+//            Log.d(TAG, "Special handling for emulator WAN address with port: ${address.port}")
+//        }
+
+        super.walkTo(address)
+    }
+
+    fun addBootstrapNodes() {
+        val knownAddresses = listOf(
+            IPv4Address("80.112.133.253", 60569),
+            IPv4Address("80.112.133.253", 41700),
+            IPv4Address("10.0.2.16", 8090)
+        )
+
+        for (address in knownAddresses) {
+            try {
+                Log.d(TAG, "Adding bootstrap node: ${address.ip}:${address.port}")
+                walkTo(address)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add bootstrap node", e)
+            }
+        }
+    }
+
+    /**
+     * Checks if all predefined Raft members have been discovered and, if so,
+     * initializes and starts the Raft module.
+     * This should be called periodically or when a new peer is discovered.
+     */
+    fun tryToFormRaftCluster() {
+        // Prevent multiple initializations
+        if (isRaftInitialized()) {
+            Log.d(TAG, "Raft is already initialized. Skipping cluster formation.")
+            return
+        }
+
+        // We only care about peers that are designated Raft members.
+        // getPeers() only returns remote peers. We must add our own peer to the list for a complete check.
+        val allKnownPeers = getPeers() + myPeer
+        val foundRaftPeers = allKnownPeers.filter { it.mid in RAFT_MEMBER_MIDS }
+
+        Log.d(TAG, "Attempting to form Raft cluster. Found ${foundRaftPeers.size}/${RAFT_MEMBER_MIDS.size} members.")
+
+        // Have we discovered all the members?
+        if (foundRaftPeers.size == RAFT_MEMBER_MIDS.size) {
+            Log.d(TAG, "All Raft members discovered. Initializing Raft module.")
+
+            // The Raft module needs the full list of participants.
+            // `myPeer` is implicitly part of the community delegate, but we can be explicit.
+            val fullCluster = (foundRaftPeers + myPeer).distinctBy { it.mid }
+
+            // Call the modified initialization function
+            initializeRaftElection(fullCluster)
+        }
     }
 }

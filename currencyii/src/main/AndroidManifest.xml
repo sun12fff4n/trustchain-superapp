@@ -8,5 +8,21 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <application>
+        <activity
+            android:name=".ui.raft.RaftTestActivity"
+            android:exported="true"
+            android:label="Raft Test">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".ui.raft.RaftTestLocalActivity"
+            android:exported="true"
+            android:label="Raft Local Test">
+        </activity>
+    </application>
 
 </manifest>
