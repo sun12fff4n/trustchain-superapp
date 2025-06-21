@@ -88,6 +88,23 @@ sequenceDiagram
 ### 3. Key Generation Process (DKG)
 #### 3.1 Protocol Flow
 
+The Distributed Key Generation (DKG) process follows a two-round protocol:
+
+1. **Round 1 - Commitment Phase**:
+   - Each participant generates a random polynomial with coefficients in Zp
+   - Computes and broadcasts polynomial commitments to TrustChain
+   - Generates zero-knowledge proofs for commitment validity
+
+2. **Round 2 - Verification Phase**:
+   - Participants verify received commitments using the proofs
+   - Each node computes and broadcasts their verification share
+   - After collecting sufficient shares, the group public key is computed
+
+This process ensures that:
+- No single party knows the complete secret key
+- The public key can be verified by all participants
+- The scheme remains secure even if some participants are compromised
+
 ```mermaid
 sequenceDiagram
     participant P as Participant
@@ -132,6 +149,26 @@ proof = Pair(r, z)
 
 ### 4. Pre-processing Phase
 #### 4.1 Nonce Generation Workflow
+The pre-processing phase generates nonce/commitment pairs in advance to enable efficient signing operations:
+
+1. **Nonce Pair Generation**:
+   - Each participant generates π (pi) pairs of random nonces (d, e)
+   - These nonces are single-use and must be kept secret until signing
+
+2. **Commitment Computation**:
+   - For each nonce pair, compute the corresponding commitments:
+     - D = g^d mod p
+     - E = g^e mod p
+   - These commitments are safe to share publicly
+
+3. **Storage and Distribution**:
+   - Nonces are stored securely for future signing operations
+   - Commitments are broadcast to the Signing Authority (SA) via TrustChain
+
+This pre-processing provides:
+- **Performance Optimization**: Computationally intensive operations done in advance
+- **Signing Efficiency**: Enables fast response when signing requests arrive
+- **Security**: Nonces remain secret until needed for signing
 
 ```mermaid
 graph TD
@@ -159,6 +196,35 @@ fun generate() {
 
 ### 5. Threshold Signing Protocol
 #### 5.1 Signing Sequence
+The threshold signing protocol enables distributed signature generation through a coordinated multi-step process:
+
+1. **Signing Initiation**:
+   - The Signing Authority (leader node) broadcasts a signing request containing:
+     - Message hash to be signed
+     - List of participating signers
+     - Session identifiers
+
+2. **Partial Signature Submission**:
+   - Each participant retrieves their pre-generated nonce pair
+   - Computes their partial signature z_i using:
+     - Private key share
+     - Nonce values
+     - Binding factors
+   - Submits partial signature to TrustChain
+
+3. **Signature Aggregation**:
+   - Signing Authority monitors TrustChain for responses
+   - Validates each partial signature
+   - Combines signatures once threshold is reached
+
+4. **Finalization**:
+   - Final aggregated signature is broadcast
+   - Signature can be verified against group public key
+
+Key properties:
+- **Non-interactive**: Participants only need to submit one message
+- **Robust**: Tolerates up to (threshold-1) unresponsive nodes
+- **Verifiable**: Each step can be independently verified
 
 ```mermaid
 sequenceDiagram
@@ -188,6 +254,20 @@ fun onReceivedZi(participantIndex: Int, z_i: BigInteger) {
     }
 }
 ```
+
+Aggregation details:
+
+- Threshold Check​​: Requires signatures from ≥t participants (where t is threshold)
+- ​​Signature Combination​​: Simple modular addition of z_i values
+- ​​Efficiency​​: O(1) aggregation operation regardless of group size
+- ​​Security​​: Each z_i contains proof of knowledge of the secret share
+
+The protocol ensures:
+
+- ​​Correctness​​: Only valid signatures can be aggregated
+- ​​Unforgeability​​: Requires cooperation of threshold participants
+- ​​Consistency​​: All participants will compute the same final signature
+
 
 ### 6. TrustChain Integration
 #### 6.1 Message Types
