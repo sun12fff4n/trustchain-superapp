@@ -86,41 +86,6 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         messageHandlers[RaftElectionMessage.HEARTBEAT_ID] = ::onHeartbeat
     }
 
-    private fun onFrostMessage(packet: Packet) {
-        val (peer, payload) = packet.getAuthPayload(object : Deserializable<FrostMessage> {
-            override fun deserialize(buffer: ByteArray, offset: Int): Pair<FrostMessage, Int> {
-                // Just ignore offset for now since our deserializer doesn’t use it
-                val (message, _) = FrostMessage.deserialize(buffer.copyOfRange(offset, buffer.size))
-                return Pair(message, buffer.size - offset)
-            }
-        })
-        val frostMessage = payload as FrostMessage
-        val sessionId = frostMessage.sessionId
-        val peerId: (Peer) -> String = { p ->
-            Base64.getEncoder().encodeToString(p.publicKey.keyToBin())
-        }
-        val peerPublicKeyHex = peerId(peer)
-
-        // Find the corresponding key generation engine
-        val engine = activeKeyGenEngines[sessionId]
-
-        if (engine != null) {
-            CoroutineScope(Dispatchers.Default).launch {
-                when (frostMessage.messageType) {
-                    FrostMessageType.COMMITMENT -> {
-                        val commitmentMessage = FrostCommitmentMessage.deserialize(sessionId, frostMessage.data)
-                        engine.processCommitmentMessage(peerPublicKeyHex, commitmentMessage.commitment, commitmentMessage.proof)
-                    }
-                    FrostMessageType.VERIFICATION_SHARE -> {
-                        val verificationShareMessage = FrostVerificationShareMessage.deserialize(sessionId, frostMessage.data)
-                        engine.processVerificationShareMessage(peerPublicKeyHex, verificationShareMessage.verificationShare)
-                    }
-                }
-            }
-        }
-        activePreProcessingEngine[walletId]?.set(sessionId, engine)
-    }
-
     // Register a new FROST key generation engine
     fun registerFrostKeyGenEngine(walletId: String, sessionId: String, engine: FrostKeyGenEngine) {
         if (!activeKeyGenEngines.containsKey(walletId)) {
