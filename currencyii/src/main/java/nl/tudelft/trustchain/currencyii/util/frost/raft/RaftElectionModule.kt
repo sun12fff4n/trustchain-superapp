@@ -15,7 +15,7 @@ import nl.tudelft.trustchain.currencyii.RaftSendDelegate
 import java.util.Random
 import java.util.UUID
 
-// Step 1: Define all possible events that can change the module's state.
+// Define all possible events that can change the module's state.
 private sealed class RaftEvent {
     data class VoteRequested(val peer: Peer, val message: RaftElectionMessage.RequestVote) : RaftEvent()
     data class VoteResponded(val peer: Peer, val term: Int, val voteGranted: Boolean) : RaftEvent()
@@ -36,7 +36,7 @@ class RaftElectionModule(
 
     private lateinit var moduleScope: CoroutineScope
 
-    // Step 2: Create a Channel to act as an event queue.
+    // Create a Channel to act as an event queue.
     private val eventChannel = Channel<RaftEvent>(Channel.UNLIMITED)
 
     enum class NodeState {
@@ -73,7 +73,7 @@ class RaftElectionModule(
         // Create a new scope every time we start. This makes the module restartable.
         moduleScope = CoroutineScope(parentScope.coroutineContext + SupervisorJob())
         Log.d(TAG, "Starting Raft election module with node ID: ${getSelfNodeIdDisplay()}")
-        // Step 3: Launch the single event processing loop.
+        // Launch the single event processing loop.
         runEventLoop()
         becomeFollower(currentTerm)
     }
@@ -106,7 +106,7 @@ class RaftElectionModule(
         electionTimeOut = moduleScope.launch {
             val timeout = minElectionTimeoutMs + Math.abs(random.nextLong()) % (maxElectionTimeoutMs - minElectionTimeoutMs)
             delay(timeout)
-            // Step 5: Instead of calling a function directly, send an event to the channel.
+            // Instead of calling a function directly, send an event to the channel.
             eventChannel.trySend(RaftEvent.ElectionTimeout)
         }
     }
@@ -160,7 +160,7 @@ class RaftElectionModule(
         startHeartbeat()
     }
 
-    // Step 4: Public-facing handlers now just send events and return immediately.
+    // Public-facing handlers now just send events and return immediately.
     fun handleRequestVote(peer: Peer, message: RaftElectionMessage.RequestVote) {
         eventChannel.trySend(RaftEvent.VoteRequested(peer, message))
     }
@@ -272,7 +272,7 @@ class RaftElectionModule(
 
     /**
      * Peer Management
-     * 
+     *
      */
     fun addPeer(peer: Peer) {
         peers.add(peer)
@@ -292,7 +292,7 @@ class RaftElectionModule(
 
     /**
      * Logger Helper Methods
-     * 
+     *
      */
     private fun getNodeIdDisplay(peer: Peer): String {
         return if (peer == community.myPeer) {

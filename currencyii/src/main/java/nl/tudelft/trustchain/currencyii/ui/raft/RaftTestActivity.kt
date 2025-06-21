@@ -231,21 +231,21 @@ class RaftTestActivity : AppCompatActivity() {
      * Discovers verified peers from the IPv8 network and registers them with the Raft module.
      * This allows the Raft cluster to form dynamically as peers connect.
      */
-    // private fun discoverAndRegisterRaftPeers() {
-    //     if (!coinCommunity.isRaftInitialized()) return
+     private fun discoverAndRegisterRaftPeers() {
+         if (!coinCommunity.isRaftInitialized()) return
 
-    //     val allPeers = IPv8Android.getInstance().network.verifiedPeers
-    //     Log.d("RaftTest", "Peer discovery found ${allPeers.size} verified peers.")
+         val allPeers = IPv8Android.getInstance().network.verifiedPeers
+         Log.d("RaftTest", "Peer discovery found ${allPeers.size} verified peers.")
 
-    //     allPeers.forEach { peer ->
-    //         // Add all connected peers to the Raft module.
-    //         // The module will handle them as part of the cluster.
-    //         if (peer.isConnected()) {
-    //             Log.d("RaftTest", "Registering peer ${peer.mid} with Raft.")
-    //             coinCommunity.addRaftPeer(peer)
-    //         }
-    //     }
-    // }
+         allPeers.forEach { peer ->
+             // Add all connected peers to the Raft module.
+             // The module will handle them as part of the cluster.
+             if (peer.isConnected()) {
+                 Log.d("RaftTest", "Registering peer ${peer.mid} with Raft.")
+                 coinCommunity.addRaftPeer(peer)
+             }
+         }
+     }
 
     // --- Handlers and Runnables ---
 
@@ -262,12 +262,12 @@ class RaftTestActivity : AppCompatActivity() {
     /**
      * A runnable task that periodically discovers and registers new peers with the Raft module.
      */
-    // private val peerDiscoveryRunnable = object : Runnable {
-    //     override fun run() {
-    //         discoverAndRegisterRaftPeers()
-    //         uiUpdateHandler.postDelayed(this, 10000L) // Discover every 10 seconds
-    //     }
-    // }
+     private val peerDiscoveryRunnable = object : Runnable {
+         override fun run() {
+             discoverAndRegisterRaftPeers()
+             uiUpdateHandler.postDelayed(this, 10000L) // Discover every 10 seconds
+         }
+     }
 
     /**
      * A runnable task that periodically attempts to connect to bootstrap nodes
