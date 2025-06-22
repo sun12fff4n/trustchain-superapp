@@ -86,15 +86,23 @@ class RaftTestLocalActivity : AppCompatActivity() {
             connectedNodes.clear()
             disconnectedNodes.clear()
 
-            // 1. Create all nodes
+            // 1. Create all simulated node instances first
             for (i in 1..TOTAL_NODE_COUNT) {
                 val node = SimulatedRaftNode(
                     UUID.randomUUID().toString(),
                     IPv4Address("127.0.0.1", 8000 + i),
                     messageBroker
                 )
+                allNodes.add(node)
+            }
+
+            val allPeers = allNodes.map { it.peer }.toSet()
+
+            // 2. Initialize Raft module for each node with the full peer list
+            for (node in allNodes) {
+                val otherPeers = allPeers - node.peer // Exclude the node itself
                 val delegate = NodeCommunicationDelegate(node.peer, messageBroker)
-                node.raftModule = RaftElectionModule(delegate, node.nodeId)
+                node.raftModule = RaftElectionModule(delegate, otherPeers, node.nodeId)
                 node.sender = delegate
 
                 node.raftModule.onLeaderChanged { newLeader ->
@@ -103,19 +111,9 @@ class RaftTestLocalActivity : AppCompatActivity() {
                         updateUI()
                     }
                 }
-                allNodes.add(node)
             }
 
-            // 2. Make all nodes aware of each other
-            for (node in allNodes) {
-                for (otherNode in allNodes) {
-                    if (node != otherNode) {
-                        node.raftModule.addPeer(otherNode.peer)
-                    }
-                }
-            }
-
-            // 3. Connect all nodes
+            // 3. Connect all nodes and start their Raft modules
             allNodes.forEach { node ->
                 connectedNodes.add(node)
                 messageBroker.registerNode(node)

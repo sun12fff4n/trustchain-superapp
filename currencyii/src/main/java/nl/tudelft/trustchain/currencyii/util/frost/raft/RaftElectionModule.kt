@@ -26,6 +26,7 @@ private sealed class RaftEvent {
 
 class RaftElectionModule(
     private val community: RaftSendDelegate,
+    initialPeers: Set<Peer>,
     private val nodeId: String = UUID.randomUUID().toString(),
     private val parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     private val random: Random = Random()
@@ -56,7 +57,7 @@ class RaftElectionModule(
     private var lastHeartbeatTime: Long = 0
 
     private var currentVotes = 0
-    private val peers = mutableSetOf<Peer>()
+    private val raftPeers: Set<Peer> = initialPeers
 
     private var onLeaderChangedCallback: ((Peer?) -> Unit)? = null
 
@@ -121,8 +122,11 @@ class RaftElectionModule(
 
         restartElectionTimeout()
 
-        val peersCopy = peers.toSet()
+        val peersCopy = raftPeers.toSet()
         val message = RaftElectionMessage.RequestVote(currentTerm, nodeId)
+
+        Log.d(TAG, "${getSelfNodeIdDisplay()}: Sending RequestVote to ${raftPeers.size}peers for term $currentTerm")
+
         peersCopy.forEach { peer ->
             community.raftSend(peer, RaftElectionMessage.REQUEST_VOTE_ID, message)
             Log.d(TAG, "Node ${getSelfNodeIdDisplay()} Sent RequestVote to ${getNodeIdDisplay(peer)} for term $currentTerm")
@@ -210,7 +214,7 @@ class RaftElectionModule(
         if(voteGranted) {
             currentVotes++
             Log.d(TAG, "${getSelfNodeIdDisplay()}: Received vote from ${getNodeIdDisplay(peer)}, total votes: $currentVotes")
-            if(currentVotes > (peers.size + 1) / 2) {
+            if(currentVotes > (raftPeers.size + 1) / 2) {
                 becomeLeader()
             }
         }
@@ -256,7 +260,7 @@ class RaftElectionModule(
     }
 
     private fun sendHeartbeats() {
-        val peersCopy = peers.toSet()
+        val peersCopy = raftPeers.toSet()
 
         peersCopy.forEach { peer ->
             sendHeartbeatMessage(peer)
@@ -274,16 +278,8 @@ class RaftElectionModule(
      * Peer Management
      *
      */
-    fun addPeer(peer: Peer) {
-        peers.add(peer)
-    }
-
-    fun removePeer(peer: Peer) {
-        peers.remove(peer)
-    }
-
     fun getPeers(): Set<Peer> {
-        return peers.toSet()
+        return raftPeers
     }
 
     fun getCurrentTerm(): Int {
