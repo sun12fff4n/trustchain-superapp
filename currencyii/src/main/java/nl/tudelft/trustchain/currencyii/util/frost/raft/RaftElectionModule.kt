@@ -49,9 +49,9 @@ class RaftElectionModule(
     private var currentLeader: Peer? = null
 
     private var electionTimeOut: Job? = null
-    private var minElectionTimeoutMs = 800L
-    private var maxElectionTimeoutMs = 1500L
-    private var heartbeatIntervalMs = 300L
+    private var minElectionTimeoutMs = 4000L
+    private var maxElectionTimeoutMs = 8000L
+    private var heartbeatIntervalMs = 1000L
     private var heartbeatJob: Job? = null
     private var lastHeartbeatTime: Long = 0
 
