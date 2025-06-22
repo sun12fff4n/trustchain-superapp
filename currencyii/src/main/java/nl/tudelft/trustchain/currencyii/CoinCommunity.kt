@@ -271,6 +271,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // handle RequestVote
     private fun onRequestVote(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring RequestVote from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}. Delegating to Raft module.")
 
         // Simply delegate the entire handling to the Raft module
@@ -280,6 +284,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // Handle VoteResponse
     private fun onVoteResponse(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.VoteResponse)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring VoteResponse from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received VoteResponse from ${peer.mid}, term=${message.term}, granted=${message.voteGranted}. Delegating to Raft module.")
 
         // Handle vote response
@@ -289,6 +297,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // Handle Heartbeat
     private fun onHeartbeat(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.Heartbeat)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring Heartbeat from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received Heartbeat from ${peer.mid}, term=${message.term}, leaderId=${message.leaderId}. Delegating to Raft module.")
 
         // Handle heartbeat message
