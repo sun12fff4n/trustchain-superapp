@@ -209,53 +209,30 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     private var _raftElectionModule: RaftElectionModule? = null
 
     val raftElectionModule: RaftElectionModule
-        get() {
-            if (_raftElectionModule == null) {
-                // Note: Lazy initialization without peers might not be ideal
-                // depending on the exact startup flow.
-                // Consider initializing only when peers are known.
-                initializeRaftElection(emptyList())
-            }
-            return _raftElectionModule!!
-        }
+        get() = _raftElectionModule ?: throw IllegalStateException("RaftElectionModule is not initialized. Call tryToFormRaftCluster first.")
 
     fun isRaftInitialized(): Boolean = _raftElectionModule != null
 
     fun initializeRaftElection(clusterPeers: Collection<Peer>) {
         if (_raftElectionModule == null) {
-            _raftElectionModule = RaftElectionModule(this)
+            // Raft 模块的对等节点列表应包含集群中除自身以外的所有其他成员。
+            val remotePeers = clusterPeers.filter { it.mid != myPeer.mid }.toSet()
+            _raftElectionModule = RaftElectionModule(this, remotePeers)
 
-            // Add all peers to the module
-            clusterPeers.forEach { peer ->
-                _raftElectionModule?.addPeer(peer)
-            }
-
-            // Set up leader change callback
+            // 设置领导者变更回调
             _raftElectionModule?.onLeaderChanged { newLeader ->
                 Log.d(TAG, "Leader changed to: ${newLeader?.mid ?: "None"}")
                 frostCoordinatorCallback?.invoke(isRaftInitialized() &&
-                    _raftElectionModule?.isLeader() == true, newLeader)
+                    raftElectionModule.isLeader(), newLeader)
             }
 
             _raftElectionModule?.start()
-            Log.d(TAG, "RaftElectionModule initialized with ${clusterPeers.size} peers.")
+            Log.d(TAG, "RaftElectionModule initialized with ${clusterPeers.size} total members (${remotePeers.size} peers).")
         }
     }
 
     fun onFrostCoordinatorChanged(callback: (isLeader: Boolean, newLeader: Peer?) -> Unit) {
         frostCoordinatorCallback = callback
-    }
-
-    fun addRaftPeer(peer: Peer) {
-        if (isRaftInitialized()) {
-            raftElectionModule.addPeer(peer)
-        }
-    }
-
-    fun removeRaftPeer(peer: Peer) {
-        if (isRaftInitialized()) {
-            raftElectionModule.removePeer(peer)
-        }
     }
 
     fun isFrostCoordinator(): Boolean {
@@ -271,6 +248,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // handle RequestVote
     private fun onRequestVote(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.RequestVote)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring RequestVote from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received RequestVote from ${peer.mid}, term=${message.term}. Delegating to Raft module.")
 
         // Simply delegate the entire handling to the Raft module
@@ -280,6 +261,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // Handle VoteResponse
     private fun onVoteResponse(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.VoteResponse)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring VoteResponse from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received VoteResponse from ${peer.mid}, term=${message.term}, granted=${message.voteGranted}. Delegating to Raft module.")
 
         // Handle vote response
@@ -289,6 +274,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
     // Handle Heartbeat
     private fun onHeartbeat(packet: Packet) {
         val (peer, message) = packet.getAuthPayload(RaftElectionMessage.Heartbeat)
+        if (peer.mid !in RAFT_MEMBER_MIDS) {
+            Log.w("RaftMsg", "Ignoring Heartbeat from non-Raft member: ${peer.mid}")
+            return
+        }
         Log.d("RaftMsg", "Received Heartbeat from ${peer.mid}, term=${message.term}, leaderId=${message.leaderId}. Delegating to Raft module.")
 
         // Handle heartbeat message
@@ -301,16 +290,16 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
             return
         }
 
-        val peers = try {
-            val peersField = raftElectionModule.javaClass.getDeclaredField("peers")
+        val raftPeers = try {
+            val peersField = raftElectionModule.javaClass.getDeclaredField("raftPeers")
             peersField.isAccessible = true
             peersField.get(raftElectionModule) as Set<*>
         } catch (e: Exception) {
             emptySet<Any>()
         }
 
-        Log.d("RaftDebug", "Raft has ${peers.size} registered peers")
-        peers.forEach { peer ->
+        Log.d("RaftDebug", "Raft has ${raftPeers.size} registered peers")
+        raftPeers.forEach { peer ->
             Log.d("RaftDebug", "Raft peer: $peer")
         }
     }
@@ -931,7 +920,7 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         const val FROST_SIGNATURE_AGREEMENT_BLOCK = "v1DAO_FROST_SIGNATURE_AGREEMENT"
 
         // Block Type for Broadcasting Message for frost.
-        const val FROST_BROADCASTING_BLOCK = "v1DAO_FROST_BROADCASTING"
+        const val FROST_BROADCASTING_BLOCK = "v1DAO_FROST_BROADCAST"
 
         // Block type for responding with a negative vote to a signature request with a signature
         const val SIGNATURE_AGREEMENT_NEGATIVE_BLOCK = "v1DAO_SIGNATURE_AGREEMENT_NEGATIVE"
@@ -946,6 +935,8 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         private val RAFT_MEMBER_MIDS = setOf(
             "80d119411e2e6effeebc9f17683be536aed46915",
             "46d1d14be95a0aaff76284149319260819877f69",
+            "05e171231300d91903d634a75e2aea64492cfa81",
+            "3a45509b5ac00497fde01772d0b0916ec54bdaff"
 
         )
 

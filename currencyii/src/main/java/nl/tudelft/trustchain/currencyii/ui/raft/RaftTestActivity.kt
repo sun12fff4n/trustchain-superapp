@@ -75,7 +75,7 @@ class RaftTestActivity : AppCompatActivity() {
         super.onResume()
         // Start periodic UI updates.
         uiUpdateHandler.post(uiUpdateRunnable)
-        // uiUpdateHandler.post(peerDiscoveryRunnable)
+        // uiUpdateHandler.post(peerDiscoveryRunnable) // This is no longer needed
     }
 
     override fun onPause() {
@@ -178,8 +178,9 @@ class RaftTestActivity : AppCompatActivity() {
      */
     private fun updateDeviceInfo() {
         val myPeer = coinCommunity.myPeer
+        val address = myPeer.wanAddress.toString()
         textDeviceId.text = "Device ID: ${myPeer.mid}"
-        textNetworkAddress.text = "Address: ${myPeer.wanAddress}"
+        textNetworkAddress.text = ""
     }
 
     /**
@@ -231,6 +232,7 @@ class RaftTestActivity : AppCompatActivity() {
      * Discovers verified peers from the IPv8 network and registers them with the Raft module.
      * This allows the Raft cluster to form dynamically as peers connect.
      */
+     /* This function is removed as the Raft cluster is now fixed.
      private fun discoverAndRegisterRaftPeers() {
          if (!coinCommunity.isRaftInitialized()) return
 
@@ -246,6 +248,7 @@ class RaftTestActivity : AppCompatActivity() {
              }
          }
      }
+     */
 
     // --- Handlers and Runnables ---
 
@@ -262,12 +265,14 @@ class RaftTestActivity : AppCompatActivity() {
     /**
      * A runnable task that periodically discovers and registers new peers with the Raft module.
      */
+    /* This is no longer needed as the cluster is fixed.
      private val peerDiscoveryRunnable = object : Runnable {
          override fun run() {
              discoverAndRegisterRaftPeers()
              uiUpdateHandler.postDelayed(this, 10000L) // Discover every 10 seconds
          }
      }
+    */
 
     /**
      * A runnable task that periodically attempts to connect to bootstrap nodes
