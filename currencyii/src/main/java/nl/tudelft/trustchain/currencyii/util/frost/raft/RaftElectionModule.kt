@@ -301,4 +301,112 @@ class RaftElectionModule(
     private fun getSelfNodeIdDisplay(): String {
         return "[Local]${nodeId.substring(0, 5)}"
     }
+    
+    // ************************************
+    // ********** test functions **********
+    // ************************************
+
+    // RequestVote Handler and React Responses
+    fun testHandleRequestVote(peer: Peer, message: RaftElectionMessage.RequestVote) {
+        Log.d(TAG, "${getSelfNodeIdDisplay()}: Handling request vote from ${getNodeIdDisplay(peer)} for term ${message.term}, candidateId=${message.candidateId}")
+
+        val voteGranted = synchronized(this) {
+            if (message.term < currentTerm) {
+                Log.d(TAG, "${getSelfNodeIdDisplay()}: Rejected vote for ${message.candidateId}: term ${message.term} < currentTerm $currentTerm")
+                return@synchronized false
+            }
+
+            if (message.term > currentTerm) {
+                becomeFollower(message.term)
+            }
+
+            // now, term == currentTerm
+            if (votedFor == null || votedFor == message.candidateId) {
+                votedFor = message.candidateId
+                restartElectionTimeout()
+                Log.d(TAG, "${getSelfNodeIdDisplay()}: Granted vote to ${message.candidateId} for term ${message.term}")
+                return@synchronized true
+            }
+
+            Log.d(TAG, "${getSelfNodeIdDisplay()}: Rejected vote for ${message.candidateId}: already voted for $votedFor")
+            return@synchronized false
+        }
+
+        // Create and send the response directly from the module
+        val response = RaftElectionMessage.VoteResponse(
+            getCurrentTerm(),
+            voteGranted
+        )
+        community.raftSend(peer, RaftElectionMessage.VOTE_RESPONSE_ID, response)
+    }
+
+    // VoteResponse Handler
+    fun testHandleVoteResponse(peer: Peer, term: Int, voteGranted: Boolean) {
+        synchronized(this) {
+            if(currentState != NodeState.CANDIDATE || term < currentTerm) {
+                // outdated
+                return
+            }
+
+            if(term > currentTerm) {
+                becomeFollower(term)
+                return
+            }
+
+            // term == currentTerm
+            if(voteGranted) {
+                currentVotes ++
+                Log.d(TAG, "${getSelfNodeIdDisplay()}: Received vote from ${getNodeIdDisplay(peer)}, total votes: $currentVotes")
+
+                if(currentVotes > (raftPeers.size + 1) / 2) {
+                    becomeLeader()
+                }
+            }
+        }
+    }
+
+    // Heartbeat Receiver
+    /**
+     * Handles an incoming heartbeat from a peer claiming to be the leader.
+     */
+    fun testHhandleHeartbeat(from: Peer, term: Int, leaderId: String) {
+        lastHeartbeatTime = System.currentTimeMillis()
+        Log.d(TAG, "[$nodeId] Received heartbeat from ${from.mid.substring(0, 5)} for term $term")
+
+        if (term >= currentTerm) {
+            val oldLeader = currentLeader
+            val wasNotFollower = currentState != NodeState.FOLLOWER
+
+            if (term > currentTerm) {
+                Log.d(TAG, "[$nodeId] Heartbeat from new leader, updating term to $term")
+                currentTerm = term
+                votedFor = null
+            }
+
+            if (wasNotFollower) {
+                Log.d(TAG, "[$nodeId] Reverting to follower state.")
+                currentState = NodeState.FOLLOWER
+                heartbeatJob?.cancel()
+            }
+
+            currentLeader = from
+
+            // Only invoke the callback if the leader has actually changed or the node just became a follower.
+            if (currentLeader != oldLeader || wasNotFollower) {
+                Log.d(TAG, "[$nodeId] New leader: ${currentLeader?.mid?.substring(0, 8)} for term $currentTerm")
+                onLeaderChangedCallback?.invoke(currentLeader)
+            }
+
+            // CRITICAL: Reset the election timeout to prevent this node from starting a new election.
+            restartElectionTimeout()
+        } else {
+            Log.w(TAG, "[$nodeId] Ignored heartbeat from old term $term (current is $currentTerm)")
+        }
+    }
+
+    fun testSetTestTimeVariables() {
+        this.minElectionTimeoutMs = 800L
+        this.maxElectionTimeoutMs = 1500L
+        this.heartbeatIntervalMs = 300L
+    }
 }
