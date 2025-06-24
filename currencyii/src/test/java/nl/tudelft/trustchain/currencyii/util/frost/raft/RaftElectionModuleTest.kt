@@ -1,5 +1,7 @@
 package nl.tudelft.trustchain.currencyii.util.frost.raft
 
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.android.keyvault.AndroidCryptoProvider
 import nl.tudelft.ipv8.messaging.Serializable
@@ -64,6 +66,8 @@ class RaftElectionModuleTest {
         raftModule.stop()
     }
 
+
+
     @Test
     fun `testHandleRequestVote should deny vote for older term`() {
         raftModule = RaftElectionModule(mockDelegate, emptySet(), "test-node-1", random = predictableRandom)
@@ -119,6 +123,7 @@ class RaftElectionModuleTest {
         assertEquals(RaftElectionModule.NodeState.FOLLOWER, raftModule.getCurrentState())
         raftModule.stop()
     }
+
 
     @Test
     fun `leader should send heartbeats to all peers`() {
@@ -208,6 +213,73 @@ class RaftElectionModuleTest {
         val (_, _, payload) = mockDelegate.sentMessages[0]
         assertFalse((payload as RaftElectionMessage.VoteResponse).voteGranted)
         raftModule.stop()
+    }
+
+
+    @Test
+    fun `handleHeartbeat should update term and leader (async)`() = runTest {
+        raftModule = RaftElectionModule(mockDelegate, emptySet(), "test-node-1", this, predictableRandom)
+        try {
+            raftModule.start()
+            val leaderPeer = Peer(AndroidCryptoProvider.generateKey())
+            raftModule.handleHeartbeat(leaderPeer, 2, "leader-2")
+            runCurrent() // Use runCurrent to execute pending event
+            assertEquals(2, raftModule.getCurrentTerm())
+            assertEquals(leaderPeer, raftModule.getCurrentLeader())
+            assertEquals(RaftElectionModule.NodeState.FOLLOWER, raftModule.getCurrentState())
+        } finally {
+            raftModule.stop()
+        }
+    }
+
+    @Test
+    fun `handleVoteResponse should make candidate leader after majority (async)`() = runTest {
+        val peer1 = Peer(AndroidCryptoProvider.generateKey())
+        val peer2 = Peer(AndroidCryptoProvider.generateKey())
+        raftModule = RaftElectionModule(mockDelegate, setOf(peer1, peer2), "test-node-1", this, predictableRandom)
+        try {
+            raftModule.start()
+
+            // Trigger election
+            raftModule.forceNewElection()
+            runCurrent() // Execute the election event
+            assertEquals(RaftElectionModule.NodeState.CANDIDATE, raftModule.getCurrentState())
+
+            // Receive votes from peers
+            raftModule.handleVoteResponse(peer1, raftModule.getCurrentTerm(), true)
+            runCurrent() // Execute the vote response event
+
+            assertEquals(RaftElectionModule.NodeState.LEADER, raftModule.getCurrentState())
+            assertTrue(raftModule.isLeader())
+        } finally {
+            raftModule.stop()
+        }
+    }
+
+
+    @Test
+    fun `handleRequestVote should grant vote if not voted yet (async)`() = runTest {
+        raftModule = RaftElectionModule(mockDelegate, emptySet(), "test-node-1", this, predictableRandom)
+        try {
+            raftModule.start()
+
+            val candidatePeer = Peer(AndroidCryptoProvider.generateKey())
+            val request = RaftElectionMessage.RequestVote(term = 1, candidateId = "candidate-1")
+
+            raftModule.handleRequestVote(candidatePeer, request)
+
+            // use runCurrent() to only execute the current event without advancing time
+            runCurrent()
+
+            assertEquals(1, mockDelegate.sentMessages.size)
+            val (targetPeer, msgId, payload) = mockDelegate.sentMessages[0]
+            assertEquals(candidatePeer, targetPeer)
+            assertEquals(RaftElectionMessage.VOTE_RESPONSE_ID, msgId)
+            assertTrue((payload as RaftElectionMessage.VoteResponse).voteGranted)
+            assertEquals(1, raftModule.getCurrentTerm())
+        } finally {
+            raftModule.stop()
+        }
     }
 
 }
