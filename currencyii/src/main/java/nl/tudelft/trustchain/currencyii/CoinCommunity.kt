@@ -933,10 +933,10 @@ class CoinCommunity constructor(serviceId: String = "02313685c1912a141279f8248fc
         private const val TAG = "CoinCommunity"
 
         private val RAFT_MEMBER_MIDS = setOf(
-            "80d119411e2e6effeebc9f17683be536aed46915",
-            "46d1d14be95a0aaff76284149319260819877f69",
-            "05e171231300d91903d634a75e2aea64492cfa81",
-            "3a45509b5ac00497fde01772d0b0916ec54bdaff"
+            "80d119411e2e6effeebc9f17683be536aed46915", // t
+            "05e171231300d91903d634a75e2aea64492cfa81", // s
+            "3a45509b5ac00497fde01772d0b0916ec54bdaff", // zz
+            "ce2aef70a5b117afda85ce5d25ea1378b818cebc"
 
         )
 
