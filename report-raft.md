@@ -260,6 +260,7 @@ stateDiagram-v2
 
 **Message flow diagram:**
 
+Old (synchronize-based version):
 ```mermaid
 flowchart TD
     %% Define node states
@@ -325,6 +326,79 @@ flowchart TD
     %% Integration with FROST
     Leader -.->|"onLeaderChanged(callback)"| FrostCoordinator
     GetCoordinator -.->|"Returns currentLeader"| HandleHeartbeat
+```
+
+New (Actor model):
+```mermaid
+flowchart TD
+    %% Define node states
+    Follower([FOLLOWER])
+    Candidate([CANDIDATE])
+    Leader([LEADER])
+
+    %% State transitions based on events
+    Follower -->|Event: ElectionTimeout| Candidate
+    Candidate -->|Event: MajorityVotesReceived| Leader
+    Candidate -->|Event: HigherTermDiscovered| Follower
+    Leader -->|Event: HigherTermDiscovered| Follower
+
+    subgraph "RaftElectionModule (Internal Logic)"
+        direction TB
+        Start("start()")
+        EventLoop{"Event Loop (Actor)"}
+
+        BecomeFollower("becomeFollower()")
+        StartElection("startElection()")
+        BecomeLeader("becomeLeader()")
+
+        RestartElectionTimeout("restartElectionTimeout()")
+        StartHeartbeat("startHeartbeat()")
+    end
+
+    subgraph "Network Messages"
+        RequestVote["msg: RequestVote"]
+        VoteResponse["msg: VoteResponse"]
+        Heartbeat["msg: Heartbeat"]
+    end
+
+    subgraph "CoinCommunity (Network Interface)"
+        OnRequestVote["onPacket(RequestVote)"]
+        OnVoteResponse["onPacket(VoteResponse)"]
+        OnHeartbeat["onPacket(Heartbeat)"]
+    end
+
+    %% Initialization Flow
+    Start --> BecomeFollower
+    BecomeFollower --> RestartElectionTimeout
+
+    %% Event-driven Core: All external and internal triggers send events to the loop
+    OnRequestVote -- "handleRequestVote()" --> EventLoop
+    OnVoteResponse -- "handleVoteResponse()" --> EventLoop
+    OnHeartbeat -- "handleHeartbeat()" --> EventLoop
+        RestartElectionTimeout -.->|sends ElectionTimeout event| EventLoop
+
+    %% Election Process driven by the Event Loop
+    EventLoop -->|processes ElectionTimeout| StartElection
+    StartElection --> Candidate
+    StartElection -.->|Sends| RequestVote
+    RequestVote -.-> OnRequestVote
+
+    EventLoop -->|processes VoteRequested, sends| VoteResponse
+    VoteResponse -.-> OnVoteResponse
+
+    EventLoop -->|processes VoteResponded, checks votes| BecomeLeader
+
+    %% Leader Process
+    BecomeLeader --> Leader
+    BecomeLeader --> StartHeartbeat
+    StartHeartbeat -.->|Periodically sends| Heartbeat
+    Heartbeat -.-> OnHeartbeat
+
+    %% Heartbeat Handling
+    EventLoop -->|processes HeartbeatReceived| RestartElectionTimeout
+
+    %% Higher Term Handling
+    EventLoop -->|processes message w/ higher term| BecomeFollower
 ```
 
 ## 3 Technical Challenges and Tradeoffs
