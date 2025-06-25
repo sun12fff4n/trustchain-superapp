@@ -1,8 +1,8 @@
 ## Raft Leader Election Documentation
 
-### 1 Project Description and Raft Algorithm
+### 1 Introduction
 
-#### 1.1 Project Overview
+#### 1.1 Implement Overview
 
 This implementation focuses on the implementation of a robust and fault-tolerant leader election mechanism for a peer-to-peer (P2P) network. The primary objective is to elect a single, temporary coordinator node from a group of peers. This coordinator is crucial for orchestrating complex, multi-round cryptographic protocols, specifically the Flexible Round-Optimized Schnorr Threshold (FROST) signature scheme. In FROST, a designated leader simplifies the communication flow by collecting and distributing messages for each round of the signing process, ensuring efficiency and order.
 
