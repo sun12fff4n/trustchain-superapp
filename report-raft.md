@@ -1,8 +1,8 @@
-# Blockchain Engineering Project Report - Democracy 2 - Raft Leader Election Part
+## Raft Leader Election Documentation
 
-## 1 Project Description and Raft Algorithm
+### 1 Project Description and Raft Algorithm
 
-### 1.1 Project Overview
+#### 1.1 Project Overview
 
 This implementation focuses on the implementation of a robust and fault-tolerant leader election mechanism for a peer-to-peer (P2P) network. The primary objective is to elect a single, temporary coordinator node from a group of peers. This coordinator is crucial for orchestrating complex, multi-round cryptographic protocols, specifically the Flexible Round-Optimized Schnorr Threshold (FROST) signature scheme. In FROST, a designated leader simplifies the communication flow by collecting and distributing messages for each round of the signing process, ensuring efficiency and order.
 
@@ -10,7 +10,7 @@ The implementation is built upon the **IPv8 P2P framework**, which provides the 
 
 A key design decision was to use a **fixed, predefined set of nodes** for the election process. This simplifies the consensus model by removing the complexities associated with dynamic membership changes, which is a suitable trade-off for the intended use case where the set of signing parties is known in advance.
 
-### 1.2 Algorithm Choice and Scope: Raft
+#### 1.2 Algorithm Choice and Scope: Raft
 
 The **Raft consensus algorithm** was selected for this project due to its design emphasis on understandability and fault tolerance. While Raft is a comprehensive algorithm for managing a replicated state machine, this project leverages only its core **leader election and heartbeat mechanisms**. The log replication components are intentionally omitted as they are not required for the sole purpose of electing a coordinator.
 
@@ -19,16 +19,16 @@ The implemented logic includes:
 *   **Term-based Logic:** The use of monotonically increasing "terms" to act as a logical clock, resolving conflicts and ensuring protocol progress.
 *   **Heartbeats:** Periodic messages sent by the leader to assert its authority and prevent followers from starting unnecessary new elections.
 
-### 1.3 Testing and Verification
+#### 1.3 Testing and Verification
 
 To ensure the correctness and robustness of the implementation, a comprehensive, multi-layered testing strategy was employed.
 
-#### 1.3.1 Unit Tests
+##### 1.3.1 Unit Tests
 Unit tests were developed to validate the core logic of the `RaftElectionModule` and `RaftElectionMessage` in isolation. These tests verify individual state transitions, term management, and voting logic under a variety of controlled scenarios.
 
 For `RaftElectionModule`, we used fixed random seed and Kotlin coroutine test utilities to simulate the passage of time and control the election timers. This allowed us to test the module's behavior under predictable conditions.
 
-#### 1.3.2 Single-Machine Simulation Test
+##### 1.3.2 Single-Machine Simulation Test
 A local simulation environment was created in `RaftTestLocalActivity.kt`. This test runs a complete, multi-node Raft cluster on a single device.
 *   **`SimulatedRaftNode`**: Represents a virtual node, each with its own instance of `RaftElectionModule`.
 *   **`RaftMessageBroker`**: Acts as a virtual network, intercepting and routing messages between the simulated nodes.
@@ -54,7 +54,7 @@ This setup allows for deterministic testing of the algorithm's behavior and faul
     }
 ````
 
-#### 1.3.3 Cross-Machine Network Test
+##### 1.3.3 Cross-Machine Network Test
 The `RaftTestActivity.kt` provides a user interface for testing the implementation across multiple devices on a real network. This activity interacts directly with the live `CoinCommunity` and its `RaftElectionModule`. It allows an operator to:
 *   Observe the real-time state (Follower, Candidate, Leader), term, and current leader of the local node.
 *   View a list of all peers discovered and participating in the Raft cluster.
@@ -62,7 +62,7 @@ The `RaftTestActivity.kt` provides a user interface for testing the implementati
 
 This test serves as the final validation, proving that the implementation works correctly in an asynchronous, real-world P2P environment with actual network latency and conditions.
 
-## 2 Algorithm Process and State Transitions
+### 2 Algorithm Process and State Transitions
 
 The implemented Raft-based election mechanism operates as a finite state machine. The core of the implementation resides in the `RaftElectionModule.kt` file, which is designed using an actor-like model with Kotlin Coroutines to ensure that all state modifications are handled sequentially, thus avoiding race conditions without the need for complex locking mechanisms.
 
@@ -129,7 +129,7 @@ interface RaftSendDelegate {
 
 The following sections describe each state in detail.
 
-### 2.1 State: Follower
+#### 2.1 State: Follower
 
 The **Follower** is the default, passive state for all nodes.
 
@@ -158,7 +158,7 @@ The `becomeFollower` function centralizes the logic for entering this state, ens
     }
 ````
 
-### 2.2 State: Candidate
+#### 2.2 State: Candidate
 
 The **Candidate** is an active state where a node is actively trying to become the new leader.
 
@@ -198,7 +198,7 @@ The `startElection` function handles the transition to the `CANDIDATE` state and
     *   **Transition to Follower**: If, while waiting for votes, it receives a `Heartbeat` from another peer claiming to be the leader for the current or a higher term, it recognizes the new leader, cancels its candidacy, and transitions back to `FOLLOWER`.
     *   **Remain Candidate (Split Vote)**: If the election timer expires again before a winner is decided (a "split vote" scenario where no candidate gets a majority), it remains a `CANDIDATE`, increments the term, and starts another election round.
 
-### 2.3 State: Leader
+#### 2.3 State: Leader
 
 The **Leader** is the single, active node responsible for managing the cluster. In the context of this project, it is the designated FROST coordinator.
 
@@ -401,15 +401,15 @@ flowchart TD
     EventLoop -->|processes message w/ higher term| BecomeFollower
 ```
 
-## 3 Technical Challenges and Tradeoffs
+### 3 Technical Challenges and Tradeoffs
 
 Developing a distributed consensus algorithm presents significant challenges. In this project, concurrency and state management are the two main issues. This section details the evolution of the implementation as these challenges were identified and addressed.
 
-### 3.1 Concurrency Problems
+#### 3.1 Concurrency Problems
 
 The core of the Raft module involves multiple independent processes running concurrently: **handling incoming network messages**, **managing election timers**, and **sending periodic heartbeats**. The initial implementation suffered from classic concurrency issues that are common in such systems.
 
-#### 3.1.1 Deadlocks and the Move to Coroutines
+##### 3.1.1 Deadlocks and the Move to Coroutines
 
 The first version of the `RaftElectionModule` relied on traditional thread-safety mechanisms, primarily using `synchronized(this)` blocks to protect all access to shared state variables like `currentState`, `currentTerm`, and `votedFor`.
 
@@ -460,7 +460,7 @@ class RaftElectionModule(
 }
 ```
 
-#### 3.1.2 Data Races
+##### 3.1.2 Data Races
 
 The `synchronized` approach also presented a high risk of data races if not applied perfectly.
 
@@ -468,7 +468,7 @@ The `synchronized` approach also presented a high risk of data races if not appl
 
 *   **Inconsistent State**: The most dangerous data race involves the node's state itself. Without the event loop, it was possible for a node's state to be read and acted upon while it was in the process of being changed by another thread. For example, a node could time out and decide to become a `CANDIDATE`, but before it could send vote requests, it might process a `Heartbeat` from a new leader. This could lead to a race where the node becomes a `FOLLOWER` but still sends out stale `RequestVote` messages, which causes confusion in the cluster. The Actor model prevents this by ensuring each event is processed to completion before the next one begins.
 
-#### 3.1.3 Robust Coroutine Lifetime Management
+##### 3.1.3 Robust Coroutine Lifetime Management
 
 A final technical challenge was to make sure that the coroutines used for timers and background tasks were managed correctly and did not leak resources, where we found the coroutine was still sending `raft` messages after the app was killed.
 
@@ -477,7 +477,7 @@ A final technical challenge was to make sure that the coroutines used for timers
     *   **Lifecycle Control**: The `start()` method launches the main event loop, and the `stop()` method explicitly calls `moduleScope.cancel()`. This single action cleanly terminates the event loop and cancels all child jobs launched within that scope, including the `electionTimeOut` timer and the `heartbeatJob`. This prevents coroutines from running in the background after the module is considered "stopped," which is essential for preventing memory leaks and unpredictable behavior in the Android application lifecycle.
 
 
-### 3.2 The Election Set Problem
+#### 3.2 The Election Set Problem
 
 A fundamental requirement of the Raft algorithm is that all participating nodes have a clear and consistent understanding of the total cluster membership. The majority calculation (requiring `(N/2) + 1` votes) is the cornerstone of Raft's safety guarantees. If nodes have different views of what constitutes the total set of voters (`N`), the entire consensus mechanism would break down.
 
@@ -485,7 +485,7 @@ This presents a significant challenge in a dynamic P2P network where nodes can j
 
 Several strategies were considered to address this challenge, each with its own set of tradeoffs.
 
-#### 3.2.1 Solution 1: Fixed Membership Set (The Chosen Approach)
+##### 3.2.1 Solution 1: Fixed Membership Set (The Chosen Approach)
 
 This approach defines the set of nodes eligible for election as a fixed, pre-configured list. All nodes are initialized with the same list of peers that form the Raft cluster.
 
@@ -498,7 +498,7 @@ This approach defines the set of nodes eligible for election as a fixed, pre-con
 
 *   **Tradeoff Decision**: For the specific use case of coordinating a FROST signature, the set of signing parties is typically known and agreed upon before the signing ceremony begins. Therefore, the inflexibility of a fixed set is an acceptable tradeoff. The simplicity and safety it provides far outweigh the need for dynamic membership for this project's scope. The implementation reflects this by having the `RaftElectionModule` initialized with a specific set of peers.
 
-#### 3.2.2 Solution 2: Centralized Registration Center
+##### 3.2.2 Solution 2: Centralized Registration Center
 
 This solution would involve a trusted, central server or a well-known endpoint that acts as a registry. Nodes would register with this center to join the election set, and all nodes would query this center to get the authoritative list of current members.
 
@@ -510,7 +510,7 @@ This solution would involve a trusted, central server or a well-known endpoint t
     *   **Security Risks**: A centralized service could become a target for attacks, and if compromised, it could lead to incorrect membership information being distributed.
     *   **Violates Decentralization**: It runs counter to the decentralized ethos of P2P and blockchain systems.
 
-#### 3.2.3 Solution 3: On-Chain Membership Management
+##### 3.2.3 Solution 3: On-Chain Membership Management
 
 This approach would leverage the underlying blockchain to manage the election set. Before an election is needed, a transaction containing the full list of participating members for the next term could be proposed and recorded on the blockchain. All nodes would then read this list from the immutable ledger.
 
@@ -524,7 +524,7 @@ This approach would leverage the underlying blockchain to manage the election se
 
 Given these considerations, the pragmatic and effective choice for this project was to adopt the **fixed membership set**. It aligns perfectly with the requirements of the FROST use case and avoids the significant complexity and performance penalties of the other solutions.
 
-### 3.3 IPv8 Framework Limitations
+#### 3.3 IPv8 Framework Limitations
 
 During the development of adapting to cross-machine practice, a significant limitation within the IPv8 framework was discovered. The default networking and peer discovery mechanisms in IPv8 are designed for real-world scenarios where each peer has a unique IP address. The framework, by default, **does not** properly support running multiple, distinct peer instances bound to the same IP address and port on a single machine.
 
@@ -532,7 +532,7 @@ When attempting to using multiple machines in the same network environment, IPv8
 
 Considerable effort, spanning over a week, was invested in diving into the IPv8 source code to find a workaround. This involved attempting to manually manage peer tables, message routing, considering internal network penetration. However, modifying the core behavior of the networking framework proved to be complex and brittle. Ultimately, the most pragmatic solution was to pivot the testing strategy. The true network validation had to be performed on multiple physical or virtual machines, with each different network environment (Wi-Fi in dormitories/mobile hotspot/eduroam).
 
-### 3.4 Integration with FROST
+#### 3.4 Integration with FROST
 
 The original goal of this part was to fully integrate the completed Raft election module with a FROST threshold signature implementation. The elected leader would act as the coordinator for the multi-round signing protocol.
 
@@ -540,7 +540,7 @@ Unfortunately, the workload required to design, implement, and thoroughly debug 
 
 As a result, a difficult but necessary decision was made to scope down this part of the whole project and leave the final integration with FROST as a direction for future work. The priority shifted to delivering a correct, stable, and well-tested leader election mechanism, which could serve as a solid foundation for that future integration.
 
-## 4 Conclusion
+### 4 Conclusion
 
 This part of project successfully designed and implemented a fault-tolerant leader election mechanism based on the Raft consensus algorithm, modified for coordinating cryptographic protocols in a P2P environment. Built upon the IPv8 framework, the module provides a robust method for electing a single leader from a fixed set of peers.
 
