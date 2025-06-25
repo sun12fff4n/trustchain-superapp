@@ -4,7 +4,7 @@
 
 ### 1.1 Project Overview
 
-This project focuses on the implementation of a robust and fault-tolerant leader election mechanism for a peer-to-peer (P2P) network. The primary objective is to elect a single, temporary coordinator node from a group of peers. This coordinator is crucial for orchestrating complex, multi-round cryptographic protocols, specifically the Flexible Round-Optimized Schnorr Threshold (FROST) signature scheme. In FROST, a designated leader simplifies the communication flow by collecting and distributing messages for each round of the signing process, ensuring efficiency and order.
+This implementation focuses on the implementation of a robust and fault-tolerant leader election mechanism for a peer-to-peer (P2P) network. The primary objective is to elect a single, temporary coordinator node from a group of peers. This coordinator is crucial for orchestrating complex, multi-round cryptographic protocols, specifically the Flexible Round-Optimized Schnorr Threshold (FROST) signature scheme. In FROST, a designated leader simplifies the communication flow by collecting and distributing messages for each round of the signing process, ensuring efficiency and order.
 
 The implementation is built upon the **IPv8 P2P framework**, which provides the underlying networking layer for peer discovery, communication, and message dispatching. This allows the project to focus on the application-level logic of the consensus algorithm rather than the intricacies of network management.
 
